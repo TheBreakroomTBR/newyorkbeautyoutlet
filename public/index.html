@@ -121,6 +121,7 @@ dialog::backdrop{background:rgba(5,2,10,.7)}
     <button data-go="reports">Reports</button>
   </nav>
   <div class="spacer"></div>
+  <button class="lock" id="setupBtn" type="button">Setup</button>
   <button class="lock" id="lockBtn" type="button">Passcode</button>
 </header>
 
@@ -270,6 +271,16 @@ dialog::backdrop{background:rgba(5,2,10,.7)}
   <div class="row" style="margin-top:12px;justify-content:flex-end"><button class="btn gold" id="passSave" type="button">Save</button></div>
 </dialog>
 
+<dialog id="setupDlg">
+  <h3>Set up Airtable</h3>
+  <p class="mut">Creates the Products, Auctions, Orders, and Settings tables in your base. Tables that already exist are left alone, so it’s safe to run again.</p>
+  <div class="log" id="setupLog" hidden></div>
+  <div class="row" style="margin-top:12px;justify-content:flex-end">
+    <button class="btn" id="setupClose" type="button">Close</button>
+    <button class="btn gold" id="setupRun" type="button">Create tables</button>
+  </div>
+</dialog>
+
 <script>
 (() => {
 'use strict';
@@ -308,12 +319,30 @@ async function api(path, { method = 'GET', body } = {}) {
   });
   const d = await r.json().catch(() => ({}));
   if (r.status === 401) { askPass(); throw new Error('Passcode required'); }
-  if (!r.ok) throw new Error(d.error || ('Request failed: ' + r.status));
+  if (!r.ok) {
+    const msg = d.error || ('Request failed: ' + r.status);
+    if (/could not find table|TABLE_NOT_FOUND|404 /i.test(msg)) throw new Error('Airtable tables not found. Click Setup, then Create tables.');
+    throw new Error(msg);
+  }
   return d;
 }
 function askPass() { if (!$('#passDlg').open) { $('#passInput').value = PASS; $('#passDlg').showModal(); } }
 $('#lockBtn').onclick = askPass;
 $('#passSave').onclick = () => { PASS = $('#passInput').value.trim(); localStorage.setItem('bat_pass', PASS); $('#passDlg').close(); refreshTab(); };
+
+// ---------- Setup ----------
+$('#setupBtn').onclick = () => { $('#setupLog').hidden = true; $('#setupLog').textContent = ''; $('#setupDlg').showModal(); };
+$('#setupClose').onclick = () => $('#setupDlg').close();
+$('#setupRun').onclick = async () => {
+  const log = $('#setupLog'); log.textContent = ''; log.hidden = false;
+  $('#setupRun').disabled = true; log.textContent = 'Creating tables…\n';
+  try {
+    const d = await api('setup', { method: 'POST' });
+    d.log.forEach((l) => logTo(log, l));
+    logTo(log, 'Done. Go to Products to add your first item.');
+  } catch (e) { logTo(log, e.message); }
+  $('#setupRun').disabled = false;
+};
 
 // ---------- Tabs ----------
 let tab = 'live';
