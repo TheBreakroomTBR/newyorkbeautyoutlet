@@ -1,0 +1,44 @@
+[build]
+  publish = "public"
+  functions = "netlify/functions"
+
+[functions]
+  node_bundler = "esbuild"
+
+# Exact-path rewrites, one per function
+[[redirects]]
+  from = "/api/scan"
+  to = "/.netlify/functions/scan"
+  status = 200
+[[redirects]]
+  from = "/api/live"
+  to = "/.netlify/functions/live"
+  status = 200
+[[redirects]]
+  from = "/api/products"
+  to = "/.netlify/functions/products"
+  status = 200
+[[redirects]]
+  from = "/api/upc-lookup"
+  to = "/.netlify/functions/upc-lookup"
+  status = 200
+[[redirects]]
+  from = "/api/order"
+  to = "/.netlify/functions/order"
+  status = 200
+[[redirects]]
+  from = "/api/review"
+  to = "/.netlify/functions/review"
+  status = 200
+[[redirects]]
+  from = "/api/report"
+  to = "/.netlify/functions/report"
+  status = 200
+[[redirects]]
+  from = "/api/tiktok-webhook"
+  to = "/.netlify/functions/tiktok-webhook"
+  status = 200
+[[redirects]]
+  from = "/api/tiktok-auth"
+  to = "/.netlify/functions/tiktok-auth"
+  status = 200
