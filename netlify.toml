@@ -42,3 +42,7 @@
   from = "/api/tiktok-auth"
   to = "/.netlify/functions/tiktok-auth"
   status = 200
+[[redirects]]
+  from = "/api/setup"
+  to = "/.netlify/functions/setup"
+  status = 200
