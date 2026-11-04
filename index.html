@@ -1,0 +1,799 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Auction Tracker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Saira+Condensed:wght@400;500;600;700;800&family=Saira:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#120a1c; --panel:#1b1128; --panel2:#24173a; --line:#33224a;
+  --gold:#d6b25e; --gold2:#f0d58e; --text:#f3ecfb; --mut:#a394b8;
+  --ok:#5ad19a; --bad:#ff7a8a; --warn:#f2c14e;
+  --display:'Saira Condensed', 'Arial Narrow', sans-serif;
+  --body:'Saira', system-ui, sans-serif;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font-family:var(--body);font-size:15px;line-height:1.45}
+button,input,select{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--gold);outline-offset:2px}
+a{color:var(--gold)}
+
+header{display:flex;align-items:center;gap:24px;padding:14px 22px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--bg);z-index:5;flex-wrap:wrap}
+.brand{font-family:var(--display);font-weight:800;font-size:26px;letter-spacing:.5px;color:var(--gold)}
+nav{display:flex;gap:4px;flex-wrap:wrap}
+nav button{background:none;border:0;padding:8px 14px;border-radius:8px;font-family:var(--display);font-size:18px;font-weight:600;color:var(--mut);cursor:pointer}
+nav button.on{color:var(--text);background:var(--panel2);box-shadow:inset 0 -2px 0 var(--gold)}
+.spacer{flex:1}
+.lock{background:none;border:1px solid var(--line);border-radius:8px;padding:6px 12px;color:var(--mut);cursor:pointer}
+
+main{padding:20px 22px 60px;max-width:1400px;margin:0 auto}
+section[data-tab]{display:none}
+section[data-tab].on{display:block}
+h2{font-family:var(--display);font-weight:700;font-size:24px;margin:0 0 12px}
+h3{font-family:var(--display);font-weight:600;font-size:19px;margin:0 0 10px;color:var(--gold2)}
+.mut{color:var(--mut)}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.btn{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:9px 16px;cursor:pointer;font-weight:500}
+.btn:hover{border-color:var(--gold)}
+.btn.gold{background:var(--gold);color:#1a1024;border-color:var(--gold);font-weight:600}
+.btn.small{padding:5px 10px;font-size:13px}
+.btn:disabled{opacity:.5;cursor:default}
+input[type=text],input[type=number],input[type=date],input[type=password],select{background:#0d0715;border:1px solid var(--line);border-radius:10px;padding:9px 12px;min-width:0}
+input:focus,select:focus{border-color:var(--gold);outline:none}
+label.f{display:flex;flex-direction:column;gap:4px;font-size:13px;color:var(--mut)}
+table{width:100%;border-collapse:collapse}
+th{font-weight:500;color:var(--mut);text-align:left;font-size:13px;padding:8px 10px;border-bottom:1px solid var(--line)}
+td{padding:8px 10px;border-bottom:1px solid #251838;vertical-align:middle}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+.tablewrap{overflow-x:auto}
+.pill{display:inline-block;padding:2px 9px;border-radius:99px;font-size:12px;font-weight:600;border:1px solid}
+.pill.Sold{color:var(--ok);border-color:#2f6b52}
+.pill.Open{color:var(--warn);border-color:#6b5726}
+.pill.Canceled{color:var(--bad);border-color:#6b2f3a}
+.pill.NoSale{color:var(--mut);border-color:var(--line)}
+.pill.Review{color:var(--bad);border-color:#6b2f3a}
+.pill.Unmatched{color:var(--warn);border-color:#6b5726}
+
+/* Live */
+.scanbar{display:flex;gap:10px;align-items:center;margin-bottom:16px;flex-wrap:wrap}
+.scanbar input{flex:1;min-width:220px;font-size:20px;padding:12px 16px;font-family:var(--display);letter-spacing:1px}
+.livegrid{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);gap:16px}
+@media (max-width:900px){.livegrid{grid-template-columns:1fr}}
+.stage{position:relative;background:linear-gradient(160deg,#25163b 0%,#160d22 70%);border:1px solid var(--line);border-radius:18px;padding:24px;display:grid;grid-template-columns:180px 1fr;gap:24px;min-height:290px;overflow:hidden}
+@media (max-width:600px){.stage{grid-template-columns:1fr}}
+.stage .img{width:180px;height:180px;border-radius:14px;background:#0d0715 center/contain no-repeat;border:1px solid var(--line);display:flex;align-items:center;justify-content:center;color:var(--mut);font-size:13px}
+.stage .label{color:var(--mut);font-size:14px}
+.stage .name{font-family:var(--display);font-weight:800;font-size:clamp(30px,4vw,52px);line-height:1;margin:6px 0 8px}
+.stage .brandline{font-size:17px;color:var(--gold2)}
+.stage .facts{display:flex;gap:22px;margin-top:16px;flex-wrap:wrap}
+.stage .facts div{font-size:13px;color:var(--mut)}
+.stage .facts b{display:block;font-family:var(--display);font-size:24px;color:var(--text);font-weight:600}
+.stage .state{margin-top:18px;font-family:var(--display);font-size:22px;font-weight:600}
+.stage .state.wait{color:var(--warn)}
+.stage .state.sold{color:var(--ok)}
+.stage.flash{animation:flash .7s ease-out}
+@keyframes flash{0%{box-shadow:0 0 0 3px var(--gold),0 0 50px rgba(214,178,94,.45)}100%{box-shadow:0 0 0 0 transparent}}
+.stage.empty{display:flex;align-items:center;justify-content:center;text-align:center;color:var(--mut)}
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px 16px}
+.stat .v{font-family:var(--display);font-weight:700;font-size:34px;line-height:1.05;font-variant-numeric:tabular-nums}
+.stat .k{color:var(--mut);font-size:13px}
+.stat.hero{grid-column:1/-1;border-color:#5a4520;background:linear-gradient(120deg,#2a1d12,#1b1128)}
+.stat.hero .v{font-size:56px;color:var(--gold)}
+.feed{margin-top:16px}
+.feed td.name{font-weight:500}
+.feed tr.fresh td{background:rgba(90,209,154,.08)}
+.thumb{width:34px;height:34px;border-radius:6px;background:#0d0715 center/cover no-repeat;border:1px solid var(--line)}
+
+/* Toast */
+#toasts{position:fixed;right:18px;bottom:18px;display:flex;flex-direction:column;gap:8px;z-index:50}
+.toast{background:var(--panel2);border:1px solid var(--line);border-left:4px solid var(--gold);border-radius:10px;padding:12px 16px;max-width:380px;box-shadow:0 10px 30px rgba(0,0,0,.4)}
+.toast.ok{border-left-color:var(--ok)} .toast.bad{border-left-color:var(--bad)} .toast.warn{border-left-color:var(--warn)}
+.toast.sale{font-family:var(--display);font-size:22px;font-weight:700;border-left-color:var(--gold)}
+
+/* Products / forms */
+.two{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.4fr);gap:16px}
+@media (max-width:1000px){.two{grid-template-columns:1fr}}
+.formgrid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.formgrid .full{grid-column:1/-1}
+.progress{height:8px;background:#0d0715;border-radius:99px;overflow:hidden;margin:10px 0}
+.progress i{display:block;height:100%;width:0;background:var(--gold);transition:width .2s}
+.log{max-height:220px;overflow:auto;font-size:13px;background:#0d0715;border:1px solid var(--line);border-radius:10px;padding:10px;white-space:pre-wrap}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:14px 0}
+.below td{color:var(--bad)}
+dialog{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:14px;padding:22px;max-width:380px}
+dialog::backdrop{background:rgba(5,2,10,.7)}
+@media (prefers-reduced-motion:reduce){.stage.flash{animation:none}}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">Auction Tracker</div>
+  <nav>
+    <button data-go="live" class="on">Live</button>
+    <button data-go="review">Review <span id="reviewCount" class="mut"></span></button>
+    <button data-go="products">Products</button>
+    <button data-go="import">Import orders</button>
+    <button data-go="reports">Reports</button>
+  </nav>
+  <div class="spacer"></div>
+  <button class="lock" id="lockBtn" type="button">Passcode</button>
+</header>
+
+<main>
+<!-- LIVE -->
+<section data-tab="live" class="on">
+  <div class="scanbar">
+    <input id="scanInput" type="text" inputmode="numeric" autocomplete="off" placeholder="Scan the next item">
+    <button class="btn" id="undoBtn" type="button">Undo last scan</button>
+    <button class="btn" id="newStreamBtn" type="button">Start new stream</button>
+  </div>
+  <div class="livegrid">
+    <div id="stage" class="stage empty"><div>Scan an item as it goes on screen.<br>Its sale price fills in automatically when the order arrives.</div></div>
+    <div class="stats">
+      <div class="stat hero"><div class="v" id="sGross">$0.00</div><div class="k">Sold this stream</div></div>
+      <div class="stat"><div class="v" id="sSold">0</div><div class="k">Items sold</div></div>
+      <div class="stat"><div class="v" id="sAvg">—</div><div class="k">Average sale</div></div>
+      <div class="stat"><div class="v" id="sProfit">—</div><div class="k">Profit over cost</div></div>
+      <div class="stat"><div class="v" id="sPace">—</div><div class="k">Items per hour</div></div>
+    </div>
+  </div>
+  <div class="panel feed">
+    <div class="row" style="justify-content:space-between"><h3>This stream</h3><span class="mut" id="liveSync"></span></div>
+    <div class="tablewrap"><table>
+      <thead><tr><th></th><th>Time</th><th>Item</th><th>Brand</th><th>Status</th><th class="num">Sale</th><th class="num">Cost</th><th class="num">Profit</th></tr></thead>
+      <tbody id="feedBody"></tbody>
+    </table></div>
+  </div>
+</section>
+
+<!-- REVIEW -->
+<section data-tab="review">
+  <div class="row" style="justify-content:space-between;margin-bottom:12px">
+    <h2>Review</h2>
+    <button class="btn" id="reviewRefresh" type="button">Refresh</button>
+  </div>
+  <p class="mut" style="max-width:760px;margin-top:0">Scans with no order yet, and orders that couldn’t be matched to a scan. Most of these clear on their own within a minute or two during a stream.</p>
+  <div class="two">
+    <div class="panel">
+      <div class="row" style="justify-content:space-between"><h3>Scans waiting for an order</h3>
+        <button class="btn small" id="noSaleOld" type="button">Mark ones older than 30 min as no sale</button></div>
+      <div class="tablewrap"><table><thead><tr><th>Scanned</th><th>Item</th><th></th></tr></thead><tbody id="openBody"></tbody></table></div>
+    </div>
+    <div class="panel">
+      <h3>Orders without a scan</h3>
+      <div class="tablewrap"><table><thead><tr><th>Order</th><th class="num">Price</th><th>Why</th><th>Assign to scan</th><th></th></tr></thead><tbody id="ordersBody"></tbody></table></div>
+    </div>
+  </div>
+</section>
+
+<!-- PRODUCTS -->
+<section data-tab="products">
+  <div class="two">
+    <div>
+      <div class="panel">
+        <h3>Add or edit a product</h3>
+        <p class="mut" style="margin-top:0">Scan a UPC. Existing products load for editing; new ones auto-fill from the UPC database.</p>
+        <div class="formgrid">
+          <label class="f full">UPC<input id="pUpc" type="text" inputmode="numeric" autocomplete="off"></label>
+          <label class="f full">Name<input id="pName" type="text"></label>
+          <label class="f">Brand<input id="pBrand" type="text"></label>
+          <label class="f">Category<input id="pCat" type="text"></label>
+          <label class="f">Cost ($)<input id="pCost" type="number" step="0.01" min="0"></label>
+          <label class="f">Qty on hand<input id="pQty" type="number" step="1"></label>
+          <label class="f full">Image URL<input id="pImg" type="text"></label>
+        </div>
+        <div class="row" style="margin-top:12px">
+          <button class="btn gold" id="pSave" type="button">Save product</button>
+          <button class="btn" id="pLookup" type="button">Look up UPC</button>
+          <button class="btn" id="pClear" type="button">Clear</button>
+          <span class="mut" id="pMsg"></span>
+        </div>
+      </div>
+      <div class="panel" style="margin-top:16px">
+        <h3>Bulk import from CSV</h3>
+        <p class="mut" style="margin-top:0">Columns: UPC, Name, Brand, Category, Cost, Qty, Image URL. Existing UPCs are updated. Format the UPC column as text in Excel so leading zeros survive.</p>
+        <div class="row">
+          <input id="bulkFile" type="file" accept=".csv,text/csv">
+          <button class="btn" id="bulkTemplate" type="button">Download template</button>
+        </div>
+        <div class="progress"><i id="bulkBar"></i></div>
+        <div class="log" id="bulkLog" hidden></div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="row" style="justify-content:space-between;margin-bottom:10px">
+        <h3 style="margin:0">Catalog</h3>
+        <input id="pSearch" type="text" placeholder="Search name, brand, or UPC" style="flex:1;max-width:320px">
+      </div>
+      <div class="tablewrap"><table>
+        <thead><tr><th></th><th>Name</th><th>Brand</th><th>UPC</th><th class="num">Cost</th><th class="num">Qty</th></tr></thead>
+        <tbody id="catBody"></tbody>
+      </table></div>
+    </div>
+  </div>
+</section>
+
+<!-- IMPORT ORDERS -->
+<section data-tab="import">
+  <h2>Import orders from TikTok Shop</h2>
+  <p class="mut" style="max-width:760px;margin-top:0">Use this until the live order connection is approved, or to backfill a day. Export orders from Seller Center as CSV (if you get .xlsx, open it and save as CSV) and drop it here. Times are read in this computer’s time zone.</p>
+  <div class="panel">
+    <div class="row"><input id="ordFile" type="file" accept=".csv,text/csv"><span class="mut" id="ordInfo"></span></div>
+    <div id="ordMap" hidden style="margin-top:14px">
+      <div class="formgrid" style="grid-template-columns:repeat(auto-fit,minmax(200px,1fr))">
+        <label class="f">Order ID column<select data-map="orderId"></select></label>
+        <label class="f">Created time column<select data-map="created"></select></label>
+        <label class="f">Sale price column<select data-map="price"></select></label>
+        <label class="f">Status column<select data-map="status"></select></label>
+        <label class="f">Buyer column<select data-map="buyer"></select></label>
+        <label class="f">Product name column<select data-map="product"></select></label>
+        <label class="f">Only rows whose product contains<input id="ordFilter" type="text" value="Item on Screen"></label>
+      </div>
+      <div class="row" style="margin-top:12px">
+        <button class="btn" id="ordPreview" type="button">Preview</button>
+        <button class="btn gold" id="ordRun" type="button" disabled>Match orders</button>
+        <span class="mut" id="ordPrevMsg"></span>
+      </div>
+      <div class="progress"><i id="ordBar"></i></div>
+      <div class="log" id="ordLog" hidden></div>
+    </div>
+  </div>
+</section>
+
+<!-- REPORTS -->
+<section data-tab="reports">
+  <div class="row" style="justify-content:space-between;margin-bottom:6px">
+    <h2>Reports</h2>
+    <div class="row">
+      <button class="btn small" data-range="today" type="button">Today</button>
+      <button class="btn small" data-range="yesterday" type="button">Yesterday</button>
+      <button class="btn small" data-range="7" type="button">7 days</button>
+      <button class="btn small" data-range="30" type="button">30 days</button>
+      <input id="rFrom" type="date"><span class="mut">to</span><input id="rTo" type="date">
+      <button class="btn gold" id="rRun" type="button">Run</button>
+    </div>
+  </div>
+  <div id="rOut"><p class="mut">Pick a range.</p></div>
+</section>
+</main>
+
+<div id="toasts" aria-live="polite"></div>
+<dialog id="passDlg">
+  <h3>Passcode</h3>
+  <p class="mut">Enter the passcode set in Netlify (APP_PASSCODE). It’s saved on this device.</p>
+  <input id="passInput" type="password" style="width:100%">
+  <div class="row" style="margin-top:12px;justify-content:flex-end"><button class="btn gold" id="passSave" type="button">Save</button></div>
+</dialog>
+
+<script>
+(() => {
+'use strict';
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => [...document.querySelectorAll(s)];
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+const USD = new Intl.NumberFormat('en-US', { style:'currency', currency:'USD' });
+const money = (n) => (n === null || n === undefined || n === '' || !isFinite(n)) ? '—' : USD.format(Number(n));
+const tm = (ms) => ms ? new Date(ms).toLocaleTimeString([], { hour:'numeric', minute:'2-digit', second:'2-digit' }) : '';
+const dt = (ms) => ms ? new Date(ms).toLocaleString([], { month:'short', day:'numeric', hour:'numeric', minute:'2-digit' }) : '';
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function normUpc(v) {
+  let d = String(v ?? '').replace(/\D/g, '');
+  if (!d) return '';
+  if (d.length === 13 && d[0] === '0') d = d.slice(1);
+  if (d.length < 12) d = d.padStart(12, '0');
+  return d;
+}
+
+function toast(msg, kind = '') {
+  const el = document.createElement('div');
+  el.className = 'toast ' + kind;
+  el.textContent = msg;
+  $('#toasts').appendChild(el);
+  setTimeout(() => el.remove(), kind === 'sale' ? 6000 : 4500);
+}
+
+// ---------- API ----------
+let PASS = localStorage.getItem('bat_pass') || '';
+async function api(path, { method = 'GET', body } = {}) {
+  const r = await fetch('/api/' + path, {
+    method,
+    headers: { 'Content-Type': 'application/json', 'x-passcode': PASS },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const d = await r.json().catch(() => ({}));
+  if (r.status === 401) { askPass(); throw new Error('Passcode required'); }
+  if (!r.ok) throw new Error(d.error || ('Request failed: ' + r.status));
+  return d;
+}
+function askPass() { if (!$('#passDlg').open) { $('#passInput').value = PASS; $('#passDlg').showModal(); } }
+$('#lockBtn').onclick = askPass;
+$('#passSave').onclick = () => { PASS = $('#passInput').value.trim(); localStorage.setItem('bat_pass', PASS); $('#passDlg').close(); refreshTab(); };
+
+// ---------- Tabs ----------
+let tab = 'live';
+$$('nav button').forEach((b) => b.onclick = () => go(b.dataset.go));
+function go(t) {
+  tab = t;
+  $$('nav button').forEach((b) => b.classList.toggle('on', b.dataset.go === t));
+  $$('section[data-tab]').forEach((s) => s.classList.toggle('on', s.dataset.tab === t));
+  refreshTab();
+}
+function refreshTab() {
+  if (tab === 'live') { loadLive(); setTimeout(() => $('#scanInput').focus(), 50); }
+  if (tab === 'review') loadReview();
+  if (tab === 'products') searchProducts();
+}
+
+// ---------- LIVE ----------
+let session = Number(localStorage.getItem('bat_session') || 0);
+if (session && Date.now() - session > 20 * 3600e3) session = 0;
+let live = [];
+let soldSeen = null;
+let lastScan = { upc: '', t: 0 };
+let currentProduct = null; // product details from the last scan (has qty)
+
+async function doScan(raw) {
+  const upc = normUpc(raw);
+  if (!upc) return;
+  const now = Date.now();
+  if (upc === lastScan.upc && now - lastScan.t < 2500) return; // scanner double-read
+  lastScan = { upc, t: now };
+  try {
+    const d = await api('scan', { method: 'POST', body: { upc } });
+    currentProduct = d.product;
+    live.unshift(d.auction);
+    renderLive(true);
+    if (d.unknown) toast('Unknown UPC ' + upc + ' — logged anyway. Add it on the Products tab.', 'warn');
+  } catch (e) { toast(e.message, 'bad'); }
+}
+
+$('#scanInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); const v = e.target.value; e.target.value = ''; doScan(v); }
+});
+// Keep the scan box focused on the Live tab so the scanner always lands there.
+document.addEventListener('click', () => {
+  if (tab !== 'live') return;
+  setTimeout(() => {
+    const a = document.activeElement;
+    if (!a || a === document.body) $('#scanInput').focus();
+  }, 200);
+});
+
+$('#undoBtn').onclick = async () => {
+  const last = live[0];
+  if (!last) return toast('Nothing to undo');
+  if (last.orderId) return toast('That scan already has a sale. Fix it on the Review tab.', 'warn');
+  if (!confirm('Remove the scan for "' + last.name + '"?')) return;
+  try {
+    await api('scan?id=' + encodeURIComponent(last.id), { method: 'DELETE' });
+    live.shift(); currentProduct = null; renderLive();
+    toast('Scan removed', 'ok');
+  } catch (e) { toast(e.message, 'bad'); }
+};
+
+$('#newStreamBtn').onclick = () => {
+  if (!confirm('Start a new stream? The Live counters reset to zero. Nothing is deleted.')) return;
+  session = Date.now();
+  localStorage.setItem('bat_session', String(session));
+  live = []; soldSeen = new Set(); currentProduct = null;
+  renderLive();
+};
+
+let liveBusy = false;
+async function loadLive() {
+  if (liveBusy) return;
+  liveBusy = true;
+  try {
+    const since = session || (Date.now() - 14 * 3600e3);
+    const d = await api('live?since=' + since);
+    live = d.auctions;
+    renderLive();
+    $('#liveSync').textContent = 'Updated ' + tm(Date.now());
+  } catch (e) {
+    $('#liveSync').textContent = e.message;
+  } finally { liveBusy = false; }
+}
+
+function renderLive(flash) {
+  const sold = live.filter((a) => a.status === 'Sold');
+  // New sale alerts
+  const ids = new Set(sold.map((a) => a.id));
+  let fresh = new Set();
+  if (soldSeen) {
+    sold.forEach((a) => { if (!soldSeen.has(a.id)) { fresh.add(a.id); toast('Sold ' + money(a.price) + ' · ' + a.name, 'sale'); } });
+  }
+  soldSeen = ids;
+
+  // Stage
+  const cur = live[0];
+  const st = $('#stage');
+  if (!cur) {
+    st.className = 'stage empty';
+    st.innerHTML = '<div>Scan an item as it goes on screen.<br>Its sale price fills in automatically when the order arrives.</div>';
+  } else {
+    const p = currentProduct && currentProduct.upc === cur.upc ? currentProduct : null;
+    const qtyLeft = p ? (cur.status === 'Sold' ? p.qty - 1 : p.qty) : null;
+    let state;
+    if (cur.status === 'Sold') state = '<div class="state sold">Sold for ' + esc(money(cur.price)) + '</div>';
+    else if (cur.status === 'Canceled') state = '<div class="state" style="color:var(--bad)">Order canceled</div>';
+    else state = '<div class="state wait">On screen · waiting for the sale</div>';
+    st.className = 'stage' + (flash || fresh.has(cur.id) ? ' flash' : '');
+    st.innerHTML =
+      '<div class="img" style="' + (cur.image ? 'background-image:url(&quot;' + esc(cur.image) + '&quot;)' : '') + '">' + (cur.image ? '' : 'No image') + '</div>' +
+      '<div><div class="label">On screen since ' + esc(tm(cur.scannedMs)) + '</div>' +
+      '<div class="name">' + esc(cur.name) + '</div>' +
+      '<div class="brandline">' + esc(cur.brand || (cur.unknown ? 'Not in catalog yet' : '')) + '</div>' +
+      '<div class="facts"><div><b>' + esc(money(cur.cost)) + '</b>Cost</div>' +
+      (qtyLeft !== null ? '<div><b>' + esc(qtyLeft) + '</b>Left in stock</div>' : '') +
+      '<div><b>' + esc(cur.upc) + '</b>UPC</div></div>' + state + '</div>';
+  }
+
+  // Stats
+  const gross = sold.reduce((s, a) => s + Number(a.price || 0), 0);
+  const costed = sold.filter((a) => a.cost !== null && a.cost !== undefined);
+  const profit = costed.reduce((s, a) => s + Number(a.price || 0) - Number(a.cost || 0), 0);
+  $('#sGross').textContent = money(gross);
+  $('#sSold').textContent = sold.length;
+  $('#sAvg').textContent = sold.length ? money(gross / sold.length) : '—';
+  $('#sProfit').textContent = costed.length ? money(profit) : '—';
+  const first = live.length ? live[live.length - 1].scannedMs : 0;
+  const hrs = first ? (Date.now() - first) / 3600e3 : 0;
+  $('#sPace').textContent = hrs > 0.1 ? (sold.length / hrs).toFixed(1) : '—';
+
+  // Feed
+  $('#feedBody').innerHTML = live.slice(0, 150).map((a) => {
+    const pr = a.status === 'Sold' && a.cost !== null && a.cost !== undefined ? Number(a.price) - Number(a.cost) : null;
+    const cls = a.status === 'No Sale' ? 'NoSale' : a.status;
+    const label = a.status === 'Open' ? 'Waiting' : a.status;
+    return '<tr class="' + (fresh.has(a.id) ? 'fresh' : '') + '">' +
+      '<td><div class="thumb" style="' + (a.image ? 'background-image:url(&quot;' + esc(a.image) + '&quot;)' : '') + '"></div></td>' +
+      '<td>' + esc(tm(a.scannedMs)) + '</td><td class="name">' + esc(a.name) + '</td><td>' + esc(a.brand) + '</td>' +
+      '<td><span class="pill ' + cls + '">' + esc(label) + '</span></td>' +
+      '<td class="num">' + (a.status === 'Sold' || a.status === 'Canceled' ? esc(money(a.price)) : '') + '</td>' +
+      '<td class="num">' + esc(money(a.cost)) + '</td>' +
+      '<td class="num" style="color:' + (pr === null ? 'inherit' : pr < 0 ? 'var(--bad)' : 'var(--ok)') + '">' + (pr === null ? '' : esc(money(pr))) + '</td></tr>';
+  }).join('') || '<tr><td colspan="8" class="mut">No scans yet this stream.</td></tr>';
+}
+
+setInterval(() => { if (tab === 'live' && !document.hidden) loadLive(); }, 4000);
+
+// ---------- REVIEW ----------
+let reviewData = { open: [], orders: [] };
+async function loadReview() {
+  try {
+    reviewData = await api('review');
+    renderReview();
+  } catch (e) { toast(e.message, 'bad'); }
+}
+function renderReview() {
+  const { open, orders } = reviewData;
+  $('#reviewCount').textContent = orders.length ? '(' + orders.length + ')' : '';
+  $('#openBody').innerHTML = open.map((a) =>
+    '<tr><td>' + esc(dt(a.scannedMs)) + '</td><td>' + esc(a.name) + '<div class="mut" style="font-size:12px">' + esc(a.upc) + '</div></td>' +
+    '<td><button class="btn small" data-nosale="' + esc(a.id) + '" type="button">No sale</button></td></tr>'
+  ).join('') || '<tr><td colspan="3" class="mut">Every scan has an order.</td></tr>';
+
+  const opts = open.map((a) => '<option value="' + esc(a.id) + '">' + esc(dt(a.scannedMs) + ' · ' + a.name) + '</option>').join('');
+  $('#ordersBody').innerHTML = orders.map((o) =>
+    '<tr><td>' + esc(dt(o.createdMs)) + '<div class="mut" style="font-size:12px">#' + esc(o.orderId) + (o.buyer ? ' · ' + esc(o.buyer) : '') + '</div></td>' +
+    '<td class="num">' + esc(money(o.price)) + '</td>' +
+    '<td><span class="pill ' + esc(o.match) + '">' + esc(o.match) + '</span><div class="mut" style="font-size:12px;max-width:220px">' + esc(o.note) + '</div></td>' +
+    '<td><select data-sel="' + esc(o.id) + '"><option value="">Pick a scan…</option>' + opts + '</select></td>' +
+    '<td class="row"><button class="btn small gold" data-assign="' + esc(o.id) + '" type="button">Assign</button>' +
+    '<button class="btn small" data-ignore="' + esc(o.id) + '" type="button">Ignore</button></td></tr>'
+  ).join('') || '<tr><td colspan="5" class="mut">Every order is matched.</td></tr>';
+}
+document.addEventListener('click', async (e) => {
+  const t = e.target.closest('button');
+  if (!t) return;
+  try {
+    if (t.dataset.nosale) {
+      await api('review', { method: 'POST', body: { action: 'nosale', ids: [t.dataset.nosale] } });
+      loadReview();
+    } else if (t.dataset.assign) {
+      const sel = document.querySelector('select[data-sel="' + CSS.escape(t.dataset.assign) + '"]');
+      if (!sel || !sel.value) return toast('Pick a scan first', 'warn');
+      await api('review', { method: 'POST', body: { action: 'assign', orderRec: t.dataset.assign, auctionRec: sel.value } });
+      toast('Order assigned', 'ok'); loadReview();
+    } else if (t.dataset.ignore) {
+      await api('review', { method: 'POST', body: { action: 'ignore', orderRec: t.dataset.ignore } });
+      loadReview();
+    }
+  } catch (err) { toast(err.message, 'bad'); }
+});
+$('#reviewRefresh').onclick = loadReview;
+$('#noSaleOld').onclick = async () => {
+  const cutoff = Date.now() - 30 * 60000;
+  const ids = reviewData.open.filter((a) => a.scannedMs < cutoff).map((a) => a.id);
+  if (!ids.length) return toast('Nothing older than 30 minutes');
+  if (!confirm('Mark ' + ids.length + ' scans as no sale?')) return;
+  try { await api('review', { method: 'POST', body: { action: 'nosale', ids } }); toast('Marked ' + ids.length + ' as no sale', 'ok'); loadReview(); }
+  catch (e) { toast(e.message, 'bad'); }
+};
+
+// ---------- PRODUCTS ----------
+const pf = { upc: $('#pUpc'), name: $('#pName'), brand: $('#pBrand'), category: $('#pCat'), cost: $('#pCost'), qty: $('#pQty'), image: $('#pImg') };
+function fillForm(p) { Object.keys(pf).forEach((k) => { if (p[k] !== undefined && p[k] !== null) pf[k].value = p[k]; }); }
+function clearForm() { Object.values(pf).forEach((i) => i.value = ''); $('#pMsg').textContent = ''; pf.upc.focus(); }
+$('#pClear').onclick = clearForm;
+
+async function loadUpc() {
+  const upc = normUpc(pf.upc.value);
+  if (!upc) return;
+  pf.upc.value = upc;
+  $('#pMsg').textContent = 'Checking…';
+  try {
+    const d = await api('products?upc=' + upc);
+    if (d.product) { fillForm(d.product); $('#pMsg').textContent = 'Already in catalog — editing.'; pf.qty.focus(); return; }
+    const l = await api('upc-lookup?upc=' + upc);
+    ['name', 'brand', 'category', 'cost', 'qty', 'image'].forEach((k) => pf[k].value = '');
+    if (l.found) { fillForm(l); $('#pMsg').textContent = 'New product — details filled from UPC. Add cost and qty.'; pf.cost.focus(); }
+    else { $('#pMsg').textContent = 'New product — no UPC match, type the details.'; pf.name.focus(); }
+  } catch (e) { $('#pMsg').textContent = e.message; }
+}
+pf.upc.addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); loadUpc(); } });
+$('#pLookup').onclick = loadUpc;
+
+$('#pSave').onclick = async () => {
+  const rec = {};
+  Object.keys(pf).forEach((k) => rec[k] = pf[k].value.trim());
+  if (!normUpc(rec.upc)) return toast('UPC is required', 'warn');
+  if (!rec.name) return toast('Name is required', 'warn');
+  try {
+    await api('products', { method: 'POST', body: { records: [rec] } });
+    toast('Saved ' + rec.name, 'ok');
+    clearForm(); searchProducts();
+  } catch (e) { toast(e.message, 'bad'); }
+};
+
+let searchTimer;
+$('#pSearch').addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(searchProducts, 300); });
+async function searchProducts() {
+  const q = $('#pSearch').value.trim();
+  try {
+    const d = await api('products' + (q ? '?q=' + encodeURIComponent(q) : ''));
+    $('#catBody').innerHTML = d.products.map((p) =>
+      '<tr data-upc="' + esc(p.upc) + '" style="cursor:pointer">' +
+      '<td><div class="thumb" style="' + (p.image ? 'background-image:url(&quot;' + esc(p.image) + '&quot;)' : '') + '"></div></td>' +
+      '<td>' + esc(p.name) + '</td><td>' + esc(p.brand) + '</td><td class="mut">' + esc(p.upc) + '</td>' +
+      '<td class="num">' + esc(money(p.cost)) + '</td><td class="num" style="color:' + (p.qty <= 0 ? 'var(--bad)' : p.qty <= 2 ? 'var(--warn)' : 'inherit') + '">' + esc(p.qty) + '</td></tr>'
+    ).join('') || '<tr><td colspan="6" class="mut">' + (q ? 'No matches.' : 'No products yet. Scan one or import a CSV.') + '</td></tr>';
+  } catch (e) { $('#catBody').innerHTML = '<tr><td colspan="6" class="mut">' + esc(e.message) + '</td></tr>'; }
+}
+$('#catBody').addEventListener('click', (e) => {
+  const tr = e.target.closest('tr[data-upc]');
+  if (!tr) return;
+  pf.upc.value = tr.dataset.upc; loadUpc(); window.scrollTo({ top: 0, behavior: 'smooth' });
+});
+
+// ---------- CSV ----------
+function parseCSV(text) {
+  text = text.replace(/^\uFEFF/, '');
+  const rows = []; let row = [], f = '', q = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (q) {
+      if (c === '"') { if (text[i + 1] === '"') { f += '"'; i++; } else q = false; }
+      else f += c;
+    } else if (c === '"') q = true;
+    else if (c === ',') { row.push(f); f = ''; }
+    else if (c === '\n') { row.push(f); rows.push(row); row = []; f = ''; }
+    else if (c !== '\r') f += c;
+  }
+  if (f !== '' || row.length) { row.push(f); rows.push(row); }
+  return rows.filter((r) => r.some((x) => String(x).trim() !== ''));
+}
+const readFile = (file) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = rej; r.readAsText(file); });
+function guess(headers, patterns) {
+  for (const p of patterns) { const i = headers.findIndex((h) => p.test(h.trim())); if (i >= 0) return i; }
+  return -1;
+}
+function logTo(el, line) { el.hidden = false; el.textContent += line + '\n'; el.scrollTop = el.scrollHeight; }
+
+$('#bulkTemplate').onclick = () => {
+  const csv = 'UPC,Name,Brand,Category,Cost,Qty,Image URL\n012345678905,Example Lip Oil,Example Brand,Lips,4.50,12,\n';
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+  a.download = 'products-template.csv'; a.click();
+};
+
+$('#bulkFile').onchange = async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const log = $('#bulkLog'); log.textContent = '';
+  const rows = parseCSV(await readFile(file));
+  if (rows.length < 2) return logTo(log, 'No rows found.');
+  const h = rows[0];
+  const col = {
+    upc: guess(h, [/^upc$/i, /upc|barcode|ean|gtin/i]),
+    name: guess(h, [/^name$/i, /name|title/i]),
+    brand: guess(h, [/brand/i]),
+    category: guess(h, [/categ/i]),
+    cost: guess(h, [/cost/i]),
+    qty: guess(h, [/^qty$/i, /qty|quantity|stock/i]),
+    image: guess(h, [/image|photo|img/i]),
+  };
+  if (col.upc < 0) return logTo(log, 'Couldn’t find a UPC column.');
+  const recs = rows.slice(1).map((r) => {
+    const o = {};
+    Object.entries(col).forEach(([k, i]) => { o[k] = i >= 0 ? (r[i] || '').trim() : ''; });
+    return o;
+  }).filter((o) => normUpc(o.upc));
+  logTo(log, 'Importing ' + recs.length + ' products…');
+  let done = 0, saved = 0;
+  for (let i = 0; i < recs.length; i += 50) {
+    const batch = recs.slice(i, i + 50);
+    try {
+      const d = await api('products', { method: 'POST', body: { records: batch } });
+      saved += d.saved; (d.errors || []).forEach((er) => logTo(log, er));
+    } catch (err) { logTo(log, 'Rows ' + (i + 1) + '–' + (i + batch.length) + ': ' + err.message); }
+    done += batch.length;
+    $('#bulkBar').style.width = (done / recs.length * 100) + '%';
+  }
+  logTo(log, 'Saved ' + saved + ' of ' + recs.length + '.');
+  e.target.value = '';
+  searchProducts();
+};
+
+// ---------- IMPORT ORDERS ----------
+let ordRows = [], ordHeaders = [], ordReady = [];
+function parseWhen(s) {
+  s = String(s || '').trim();
+  if (!s) return NaN;
+  if (/^\d{10}$/.test(s)) return Number(s) * 1000;
+  if (/^\d{13}$/.test(s)) return Number(s);
+  let m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})[ ,T]+(\d{1,2}):(\d{2})(?::(\d{2}))?\s*([AP]M)?$/i);
+  if (m) {
+    let h = Number(m[4]);
+    if (m[7]) { const pm = /p/i.test(m[7]); if (pm && h < 12) h += 12; if (!pm && h === 12) h = 0; }
+    return new Date(Number(m[3]), Number(m[1]) - 1, Number(m[2]), h, Number(m[5]), Number(m[6] || 0)).getTime();
+  }
+  m = s.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+  if (m) return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]), Number(m[6] || 0)).getTime();
+  return Date.parse(s);
+}
+const parseMoney = (s) => { const n = parseFloat(String(s || '').replace(/[^0-9.\-]/g, '')); return isFinite(n) ? n : NaN; };
+
+$('#ordFile').onchange = async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const rows = parseCSV(await readFile(file));
+  if (rows.length < 2) { $('#ordInfo').textContent = 'No rows found.'; return; }
+  ordHeaders = rows[0]; ordRows = rows.slice(1);
+  $('#ordInfo').textContent = ordRows.length + ' rows';
+  const g = {
+    orderId: guess(ordHeaders, [/^order id$/i, /order.?id/i]),
+    created: guess(ordHeaders, [/^created time$/i, /creat/i, /order.*(time|date)/i, /paid time/i]),
+    price: guess(ordHeaders, [/sku subtotal before discount/i, /sku unit original price/i, /sku subtotal/i, /order amount/i, /subtotal/i, /price/i]),
+    status: guess(ordHeaders, [/^order status$/i, /status/i]),
+    buyer: guess(ordHeaders, [/buyer user ?name/i, /buyer/i]),
+    product: guess(ordHeaders, [/^product name$/i, /product/i]),
+  };
+  $$('select[data-map]').forEach((sel) => {
+    const k = sel.dataset.map;
+    sel.innerHTML = '<option value="-1">(none)</option>' + ordHeaders.map((h, i) => '<option value="' + i + '">' + esc(h) + '</option>').join('');
+    sel.value = String(g[k]);
+  });
+  $('#ordMap').hidden = false;
+  $('#ordRun').disabled = true;
+  $('#ordPrevMsg').textContent = 'Check the columns, then preview.';
+};
+
+$('#ordPreview').onclick = () => {
+  const m = {}; $$('select[data-map]').forEach((s) => m[s.dataset.map] = Number(s.value));
+  if (m.orderId < 0 || m.created < 0 || m.price < 0) return toast('Order ID, created time, and price columns are required', 'warn');
+  const filt = $('#ordFilter').value.trim().toLowerCase();
+  const seen = new Map(); let skipped = 0, bad = 0;
+  ordRows.forEach((r) => {
+    const id = String(r[m.orderId] || '').trim();
+    if (!/^\d{6,}$/.test(id)) { skipped++; return; } // skips TikTok's description row
+    if (filt && m.product >= 0 && !String(r[m.product] || '').toLowerCase().includes(filt)) { skipped++; return; }
+    if (seen.has(id)) return;
+    const createdMs = parseWhen(r[m.created]);
+    const price = parseMoney(r[m.price]);
+    if (!isFinite(createdMs) || !isFinite(price)) { bad++; return; }
+    seen.set(id, { orderId: id, createdMs, price, status: m.status >= 0 ? r[m.status] : '', buyer: m.buyer >= 0 ? r[m.buyer] : '' });
+  });
+  ordReady = [...seen.values()].sort((a, b) => a.createdMs - b.createdMs);
+  const first = ordReady[0], last = ordReady[ordReady.length - 1];
+  $('#ordPrevMsg').textContent = ordReady.length + ' orders ready' +
+    (first ? ' (' + dt(first.createdMs) + ' to ' + dt(last.createdMs) + ', ' + money(ordReady.reduce((s, o) => s + o.price, 0)) + ')' : '') +
+    (skipped ? ' · ' + skipped + ' rows skipped' : '') + (bad ? ' · ' + bad + ' unreadable' : '');
+  $('#ordRun').disabled = !ordReady.length;
+};
+
+$('#ordRun').onclick = async () => {
+  const log = $('#ordLog'); log.textContent = '';
+  $('#ordRun').disabled = true;
+  const tally = {};
+  for (let i = 0; i < ordReady.length; i += 2) {
+    const batch = ordReady.slice(i, i + 2);
+    try {
+      const d = await api('order', { method: 'POST', body: { orders: batch } });
+      d.results.forEach((r) => {
+        tally[r.result] = (tally[r.result] || 0) + 1;
+        if (r.result !== 'matched' && r.result !== 'updated') logTo(log, '#' + r.orderId + ': ' + r.result + (r.note ? ' — ' + r.note : ''));
+      });
+    } catch (e) { logTo(log, 'Batch at ' + (i + 1) + ': ' + e.message); await sleep(1500); }
+    $('#ordBar').style.width = (Math.min(i + 2, ordReady.length) / ordReady.length * 100) + '%';
+  }
+  logTo(log, 'Done: ' + Object.entries(tally).map(([k, v]) => v + ' ' + k).join(', '));
+  $('#ordRun').disabled = false;
+};
+
+// ---------- REPORTS ----------
+const ymd = (d) => d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+function setRange(r) {
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  let from = new Date(today), to = new Date(today);
+  if (r === 'yesterday') { from.setDate(from.getDate() - 1); to = new Date(from); }
+  else if (r !== 'today') from.setDate(from.getDate() - (Number(r) - 1));
+  $('#rFrom').value = ymd(from); $('#rTo').value = ymd(to);
+}
+$$('[data-range]').forEach((b) => b.onclick = () => { setRange(b.dataset.range); runReport(); });
+$('#rRun').onclick = runReport;
+
+async function runReport() {
+  const [fy, fm, fd] = $('#rFrom').value.split('-').map(Number);
+  const [ty, tmo, td] = $('#rTo').value.split('-').map(Number);
+  if (!fy || !ty) return toast('Pick dates', 'warn');
+  const fromMs = new Date(fy, fm - 1, fd).getTime();
+  const toMs = new Date(ty, tmo - 1, td + 1).getTime();
+  $('#rOut').innerHTML = '<p class="mut">Loading…</p>';
+  try {
+    const { auctions } = await api('report?fromMs=' + fromMs + '&toMs=' + toMs);
+    renderReport(auctions);
+  } catch (e) { $('#rOut').innerHTML = '<p class="mut">' + esc(e.message) + '</p>'; }
+}
+
+function renderReport(rows) {
+  const sold = rows.filter((a) => a.status === 'Sold');
+  const gross = sold.reduce((s, a) => s + Number(a.price || 0), 0);
+  const costed = sold.filter((a) => a.cost !== null && a.cost !== undefined);
+  const cost = costed.reduce((s, a) => s + Number(a.cost), 0);
+  const profit = costed.reduce((s, a) => s + Number(a.price) - Number(a.cost), 0);
+  const count = (s) => rows.filter((a) => a.status === s).length;
+
+  const byDay = {};
+  sold.forEach((a) => { const k = a.streamDate || ymd(new Date(a.scannedMs)); (byDay[k] = byDay[k] || { n: 0, g: 0, p: 0 }); byDay[k].n++; byDay[k].g += Number(a.price); if (a.cost != null) byDay[k].p += Number(a.price) - Number(a.cost); });
+  const byBrand = {};
+  sold.forEach((a) => { const k = a.brand || '(no brand)'; (byBrand[k] = byBrand[k] || { n: 0, g: 0, p: 0 }); byBrand[k].n++; byBrand[k].g += Number(a.price); if (a.cost != null) byBrand[k].p += Number(a.price) - Number(a.cost); });
+  const below = sold.filter((a) => a.cost != null && Number(a.price) < Number(a.cost)).sort((a, b) => (a.price - a.cost) - (b.price - b.cost));
+  const top = [...sold].sort((a, b) => b.price - a.price).slice(0, 10);
+
+  const kpi = (v, k) => '<div class="stat"><div class="v">' + esc(v) + '</div><div class="k">' + esc(k) + '</div></div>';
+  const table = (head, body) => '<div class="tablewrap"><table><thead><tr>' + head + '</tr></thead><tbody>' + (body || '<tr><td class="mut" colspan="6">Nothing here.</td></tr>') + '</tbody></table></div>';
+
+  $('#rOut').innerHTML =
+    '<div class="kpis">' +
+      kpi(money(gross), 'Gross sales') + kpi(sold.length, 'Items sold') + kpi(sold.length ? money(gross / sold.length) : '—', 'Average sale') +
+      kpi(costed.length ? money(profit) : '—', 'Profit over cost') + kpi(cost ? (profit / cost * 100).toFixed(0) + '%' : '—', 'Return on cost') +
+      kpi(count('Canceled'), 'Canceled') + kpi(count('No Sale'), 'No sale') + kpi(count('Open'), 'Still waiting') +
+    '</div>' +
+    '<div class="two">' +
+      '<div class="panel"><h3>By day</h3>' + table('<th>Day</th><th class="num">Sold</th><th class="num">Gross</th><th class="num">Avg</th><th class="num">Profit</th>',
+        Object.entries(byDay).sort((a, b) => b[0].localeCompare(a[0])).map(([k, v]) => '<tr><td>' + esc(k) + '</td><td class="num">' + v.n + '</td><td class="num">' + esc(money(v.g)) + '</td><td class="num">' + esc(money(v.g / v.n)) + '</td><td class="num">' + esc(money(v.p)) + '</td></tr>').join('')) + '</div>' +
+      '<div class="panel"><h3>By brand</h3>' + table('<th>Brand</th><th class="num">Sold</th><th class="num">Gross</th><th class="num">Avg</th><th class="num">Profit</th>',
+        Object.entries(byBrand).sort((a, b) => b[1].g - a[1].g).map(([k, v]) => '<tr><td>' + esc(k) + '</td><td class="num">' + v.n + '</td><td class="num">' + esc(money(v.g)) + '</td><td class="num">' + esc(money(v.g / v.n)) + '</td><td class="num">' + esc(money(v.p)) + '</td></tr>').join('')) + '</div>' +
+    '</div>' +
+    '<div class="two" style="margin-top:16px">' +
+      '<div class="panel"><h3>Sold below cost</h3>' + table('<th>Item</th><th class="num">Sale</th><th class="num">Cost</th><th class="num">Loss</th>',
+        below.slice(0, 50).map((a) => '<tr class="below"><td>' + esc(a.name) + '</td><td class="num">' + esc(money(a.price)) + '</td><td class="num">' + esc(money(a.cost)) + '</td><td class="num">' + esc(money(a.price - a.cost)) + '</td></tr>').join('')) + '</div>' +
+      '<div class="panel"><h3>Top sales</h3>' + table('<th>Item</th><th>Brand</th><th class="num">Sale</th>',
+        top.map((a) => '<tr><td>' + esc(a.name) + '</td><td>' + esc(a.brand) + '</td><td class="num">' + esc(money(a.price)) + '</td></tr>').join('')) + '</div>' +
+    '</div>';
+}
+
+// ---------- boot ----------
+setRange('today');
+refreshTab();
+})();
+</script>
+</body>
+</html>
