@@ -16,7 +16,7 @@ exports.handler = wrap(async (event) => {
         price: Number(o.price),
         status: o.status || '',
         buyer: o.buyer || '',
-        source: 'csv',
+        source: o.source === 'test' ? 'test' : 'csv',
       }));
     } catch (e) {
       results.push({ orderId: o.orderId, result: 'error', note: e.message });
