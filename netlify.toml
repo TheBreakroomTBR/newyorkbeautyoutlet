@@ -50,3 +50,7 @@
   from = "/api/test-tools"
   to = "/.netlify/functions/test-tools"
   status = 200
+[[redirects]]
+  from = "/api/bundles"
+  to = "/.netlify/functions/bundles"
+  status = 200
