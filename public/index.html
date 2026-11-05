@@ -129,6 +129,19 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 .kpis .stat:first-child{background:var(--rosegold);color:#fff;border:0}
 .kpis .stat:first-child .k{color:rgba(255,255,255,.9)}
 .below td{color:var(--bad)}
+.bitem{display:flex;align-items:center;gap:12px;padding:10px 0;border-bottom:1px solid #f6e4e6}
+.bitem .nm{flex:1;min-width:0}
+.bitem .nm b{display:block;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.bitem .nm span{font-size:12px;color:var(--mut)}
+.qtybtn{width:28px;height:28px;border-radius:8px;border:1px solid var(--line2);background:#fff;cursor:pointer;font-weight:600}
+.bsum{display:flex;gap:22px;flex-wrap:wrap;margin:14px 0}
+.bsum div{font-size:12px;color:var(--mut)} .bsum b{display:block;font-family:var(--serif);font-size:22px;color:var(--ink)}
+.labelprev{background:#fff;border:1px dashed var(--line2);border-radius:12px;padding:14px;text-align:center;margin-top:12px}
+.labelprev svg{max-width:100%;height:auto}
+.bcard{display:flex;gap:14px;align-items:center;padding:12px 0;border-bottom:1px solid #f6e4e6}
+.bcard .nm{flex:1;min-width:0} .bcard .nm b{display:block;font-weight:600}
+.bcard .nm span{display:block;font-size:12px;color:var(--mut);white-space:pre-line}
+.stage .contents{font-size:13px;color:var(--mut);margin-top:6px;white-space:pre-line;columns:2 220px;column-gap:20px;max-height:9.5em;overflow:hidden}
 .testbar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;background:#fbf0d9;border:1px solid #efd9a6;color:#6b4d10;border-radius:14px;padding:10px 14px;margin:-6px 0 16px}
 .check{display:flex;align-items:center;gap:10px;font-weight:500}
 .check input{width:18px;height:18px;accent-color:var(--rose)}
@@ -145,6 +158,7 @@ dialog::backdrop{background:rgba(60,30,36,.35);backdrop-filter:blur(3px)}
     <button data-go="live" class="on">Live</button>
     <button data-go="review">Review <span id="reviewCount" class="mut"></span></button>
     <button data-go="products">Products</button>
+    <button data-go="bundles">Bundles</button>
     <button data-go="import">Import orders</button>
     <button data-go="reports">Reports</button>
     <button data-go="test">Test</button>
@@ -295,6 +309,34 @@ dialog::backdrop{background:rgba(60,30,36,.35);backdrop-filter:blur(3px)}
   </div>
   <div id="rOut"><p class="mut">Pick a range.</p></div>
 </section>
+<!-- BUNDLES -->
+<section data-tab="bundles">
+  <h2>Bundles</h2>
+  <p class="mut" style="max-width:780px;margin-top:0">Scan 2 or more products to sell together as one auction. The bundle gets its own barcode label. Scan that label on Live like any product, and when it sells, every item inside comes off stock.</p>
+  <div class="two">
+    <div class="panel">
+      <h3>Build a bundle</h3>
+      <input id="bScan" type="text" inputmode="numeric" autocomplete="off" placeholder="Scan an item to add it" style="width:100%;font-size:16px;padding:12px 16px;border-radius:99px">
+      <div id="bItems" style="margin-top:8px"></div>
+      <div class="bsum" id="bSum"></div>
+      <div class="formgrid">
+        <label class="f full">Bundle name (optional — auto-named if blank)<input id="bName" type="text"></label>
+        <label class="f">Start price ($)<input id="bStart" type="number" step="0.01" min="0" placeholder="Sum of items"></label>
+        <label class="f">How many of this bundle<input id="bQty" type="number" step="1" min="1" value="1"></label>
+        <label class="f full">Label size<select id="bSize"><option value="2.25x1.25">2.25″ × 1.25″ (thermal label)</option><option value="4x6">4″ × 6″ (shipping label)</option><option value="letter">Letter sheet</option></select></label>
+      </div>
+      <div class="row" style="margin-top:14px">
+        <button class="btn gold" id="bCreate" type="button">Create bundle &amp; print label</button>
+        <button class="btn" id="bClear" type="button">Clear</button>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="row" style="justify-content:space-between"><h3 style="margin:0">Your bundles</h3><button class="btn small" id="bRefresh" type="button">Refresh</button></div>
+      <div id="bList" style="margin-top:6px"></div>
+    </div>
+  </div>
+</section>
+
 <!-- TEST -->
 <section data-tab="test">
   <h2>Test without going live</h2>
@@ -304,6 +346,7 @@ dialog::backdrop{background:rgba(60,30,36,.35);backdrop-filter:blur(3px)}
         <h3>1. Practice run (no TikTok needed)</h3>
         <p class="mut" style="margin-top:0">Turn this on, then go to Live. Scan real products, type a price, and click <b>Simulate sale</b>. It runs through the same matching, stock, and reports as a real order.</p>
         <label class="check"><input type="checkbox" id="testMode"> Show “Simulate sale” on the Live tab</label>
+        <p class="mut" style="font-size:12.5px;margin-bottom:0">Turns off automatically when you reload the page or start a new stream, so it never shows during a real show by accident.</p>
       </div>
       <div class="panel" style="margin-top:16px">
         <h3>3. Clean up</h3>
@@ -423,6 +466,7 @@ function refreshTab() {
   if (tab === 'live') { loadLive(); setTimeout(() => $('#scanInput').focus(), 50); }
   if (tab === 'review') loadReview();
   if (tab === 'products') searchProducts();
+  if (tab === 'bundles') { loadBundles(); setTimeout(() => $('#bScan').focus(), 50); }
 }
 
 // ---------- LIVE ----------
@@ -477,6 +521,7 @@ $('#newStreamBtn').onclick = () => {
   session = Date.now();
   localStorage.setItem('bat_session', String(session));
   live = []; soldSeen = new Set(); currentProduct = null;
+  if (typeof testMode !== 'undefined' && testMode) { testMode = false; syncTest(); }
   renderLive();
 };
 
@@ -523,7 +568,8 @@ function renderLive(flash) {
       '<div class="img" style="' + (cur.image ? 'background-image:url(&quot;' + esc(cur.image) + '&quot;)' : '') + '">' + (cur.image ? '' : esc(initials(cur.brand || cur.name))) + '</div>' +
       '<div><div class="label">On screen now</div>' +
       '<div class="name">' + esc(cur.name) + '</div>' +
-      '<div class="brandline">' + esc(cur.brand || (cur.unknown ? 'Not in catalog yet' : '')) + '</div>' +
+      '<div class="brandline">' + esc(p && p.isBundle ? 'Bundle · ' + bundleLines(p.contents).reduce((n, l) => n + l.count, 0) + ' items' : (cur.brand || (cur.unknown ? 'Not in catalog yet' : ''))) + '</div>' +
+      (p && p.isBundle ? '<div class="contents">' + esc(bundleLines(p.contents).map((l) => l.count + '× ' + l.name).join('\n')) + '</div>' : '') +
       '<div class="facts"><div><b>' + esc(tm(cur.scannedMs)) + '</b>Went up</div><div><b>' + esc(money(cur.cost)) + '</b>Cost</div>' +
       (qtyLeft !== null ? '<div><b>' + esc(qtyLeft) + '</b>Left in stock</div>' : '') +
       '<div><b>' + esc(cur.upc) + '</b>UPC</div></div>' + state + '</div>';
@@ -885,10 +931,136 @@ function renderReport(rows) {
     '</div>';
 }
 
+// ---------- BARCODES (UPC-A, drawn as SVG) ----------
+const L_CODES = ['0001101','0011001','0010011','0111101','0100011','0110001','0101111','0111011','0110111','0001011'];
+const R_CODE = (d) => L_CODES[d].replace(/./g, (b) => (b === '0' ? '1' : '0'));
+function upcSvg(code, opts = {}) {
+  const d = String(code).padStart(12, '0').split('').map(Number);
+  const mod = opts.module || 2, bar = opts.height || 60, guard = bar + 8, q = 9 * mod;
+  let bits = '101';
+  for (let i = 0; i < 6; i++) bits += L_CODES[d[i]];
+  bits += '01010';
+  for (let i = 6; i < 12; i++) bits += R_CODE(d[i]);
+  bits += '101';
+  const isGuard = (i) => i < 10 || (i >= 45 && i < 50) || i >= 85; // guards + first/last digit bars
+  let rects = '';
+  for (let i = 0; i < 95; i++) if (bits[i] === '1') rects += '<rect x="' + (q + i * mod) + '" y="0" width="' + mod + '" height="' + (isGuard(i) ? guard : bar) + '"/>';
+  const W = 95 * mod + 2 * q, fs = 7 * mod, ty = bar + fs + 1;
+  const t = (x, s, anchor) => '<text x="' + x + '" y="' + ty + '" font-size="' + fs + '" text-anchor="' + (anchor || 'middle') + '" font-family="Arial, Helvetica, sans-serif">' + s + '</text>';
+  const txt = t(q - 2 * mod, d[0], 'end') + t(q + 28 * mod, d.slice(1, 6).join('')) + t(q + 67 * mod, d.slice(6, 11).join('')) + t(q + 97 * mod, d[11], 'start');
+  return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + W + ' ' + (ty + 2) + '" width="' + W + '" height="' + (ty + 2) + '" fill="#000">' + rects + txt + '</svg>';
+}
+function bundleLines(text) {
+  return String(text || '').split('\n').map((l) => l.match(/^\s*(\d{12})\s*[×xX*]\s*(\d+)\s*[—-]?\s*(.*)$/)).filter(Boolean).map((m) => ({ upc: m[1], count: Number(m[2]), name: m[3] }));
+}
+
+function printLabel(b, size) {
+  const lines = bundleLines(b.contents);
+  const dims = { '2.25x1.25': ['2.25in', '1.25in'], '4x6': ['4in', '6in'], letter: ['8.5in', '11in'] }[size] || ['2.25in', '1.25in'];
+  const small = size === '2.25x1.25';
+  const one = '<div class="lbl"><div class="t">' + esc(b.name) + '</div>' +
+    (small ? '<div class="c">' + lines.reduce((n, l) => n + l.count, 0) + ' items' + (b.startPrice ? ' · start ' + esc(money(b.startPrice)) : '') + '</div>'
+           : '<div class="c">' + lines.map((l) => esc(l.count + '× ' + l.name)).join('<br>') + (b.startPrice ? '<br><b>Start ' + esc(money(b.startPrice)) + '</b>' : '') + '</div>') +
+    '<div class="bc">' + upcSvg(b.upc, { module: 2, height: small ? 34 : 70 }) + '</div></div>';
+  const count = size === 'letter' ? 1 : Math.max(1, Number(b.qty) || 1);
+  const html = '<!doctype html><html><head><title>' + esc(b.name) + '</title><style>' +
+    '@page{size:' + dims[0] + ' ' + dims[1] + ';margin:0}*{box-sizing:border-box}body{margin:0;font-family:Arial,Helvetica,sans-serif;color:#000}' +
+    '.lbl{width:' + dims[0] + ';height:' + dims[1] + ';padding:' + (small ? '0.06in 0.1in' : '0.3in') + ';display:flex;flex-direction:column;justify-content:space-between;page-break-after:always;overflow:hidden}' +
+    '.t{font-weight:700;font-size:' + (small ? '9pt' : '16pt') + ';line-height:1.15;max-height:' + (small ? '2.3em' : 'none') + ';overflow:hidden}' +
+    '.c{font-size:' + (small ? '7pt' : '11pt') + ';line-height:1.35;margin:2px 0}' +
+    '.bc svg{width:100%;height:auto;display:block;max-height:' + (small ? '0.62in' : '2in') + '}' +
+    '</style></head><body>' + one.repeat(count) + '<script>window.onload=function(){setTimeout(function(){window.print()},200)}<\/script></body></html>';
+  const w = window.open('', '_blank');
+  if (!w) return toast('Allow pop-ups for this site to print labels', 'warn');
+  w.document.open(); w.document.write(html); w.document.close();
+}
+
+// ---------- BUNDLES ----------
+let bItems = []; // {upc, name, brand, cost, startPrice, count}
+async function bAdd(raw) {
+  const upc = normUpc(raw);
+  if (!upc) return;
+  const have = bItems.find((i) => i.upc === upc);
+  if (have) { have.count++; return renderBuilder(); }
+  try {
+    const d = await api('products?upc=' + upc);
+    if (!d.product) return toast('UPC ' + upc + ' isn’t in your catalog. Add it on Products first.', 'warn');
+    if (d.product.isBundle) return toast('That’s already a bundle', 'warn');
+    bItems.push({ upc, name: d.product.name, brand: d.product.brand, cost: d.product.cost, startPrice: d.product.startPrice, qty: d.product.qty, count: 1 });
+    renderBuilder();
+  } catch (e) { toast(e.message, 'bad'); }
+}
+$('#bScan').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.preventDefault(); const v = e.target.value; e.target.value = ''; bAdd(v); } });
+
+function renderBuilder() {
+  $('#bItems').innerHTML = bItems.map((it, i) =>
+    '<div class="bitem"><div class="nm"><b>' + esc(it.name) + '</b><span>' + esc(it.brand) + ' · ' + esc(it.upc) + ' · cost ' + esc(money(it.cost)) + ' · ' + esc(it.qty) + ' in stock</span></div>' +
+    '<button class="qtybtn" data-bminus="' + i + '" type="button" aria-label="One fewer">−</button><b style="min-width:22px;text-align:center">' + it.count + '</b>' +
+    '<button class="qtybtn" data-bplus="' + i + '" type="button" aria-label="One more">+</button>' +
+    '<button class="btn small" data-bremove="' + i + '" type="button">Remove</button></div>'
+  ).join('') || '<p class="mut">No items yet. Scan the first product.</p>';
+  const n = bItems.reduce((a, it) => a + it.count, 0);
+  const costKnown = bItems.length && bItems.every((it) => it.cost !== null && it.cost !== undefined);
+  const cost = bItems.reduce((a, it) => a + Number(it.cost || 0) * it.count, 0);
+  const start = bItems.reduce((a, it) => a + Number(it.startPrice || 0) * it.count, 0);
+  $('#bSum').innerHTML = '<div><b>' + n + '</b>Items</div><div><b>' + (costKnown ? esc(money(cost)) : '—') + '</b>Total cost</div><div><b>' + (start ? esc(money(start)) : '—') + '</b>Items’ start prices</div>';
+  $('#bCreate').disabled = n < 2;
+}
+$('#bItems').addEventListener('click', (e) => {
+  const t = e.target.closest('button'); if (!t) return;
+  if (t.dataset.bplus) bItems[+t.dataset.bplus].count++;
+  if (t.dataset.bminus) { const it = bItems[+t.dataset.bminus]; it.count--; if (it.count < 1) bItems.splice(+t.dataset.bminus, 1); }
+  if (t.dataset.bremove) bItems.splice(+t.dataset.bremove, 1);
+  renderBuilder();
+});
+$('#bClear').onclick = () => { bItems = []; $('#bName').value = ''; $('#bStart').value = ''; $('#bQty').value = '1'; renderBuilder(); $('#bScan').focus(); };
+
+$('#bCreate').onclick = async () => {
+  if (bItems.reduce((a, it) => a + it.count, 0) < 2) return toast('Add at least 2 items', 'warn');
+  $('#bCreate').disabled = true;
+  try {
+    const d = await api('bundles', { method: 'POST', body: {
+      items: bItems.map((it) => ({ upc: it.upc, count: it.count })),
+      name: $('#bName').value.trim(), startPrice: $('#bStart').value.trim(), qty: $('#bQty').value,
+    } });
+    toast('Bundle created · ' + d.bundle.upc, 'ok');
+    printLabel(d.bundle, $('#bSize').value);
+    $('#bClear').click();
+    loadBundles();
+  } catch (e) { toast(e.message, 'bad'); }
+  $('#bCreate').disabled = false;
+};
+
+let bundles = [];
+async function loadBundles() {
+  try {
+    const d = await api('bundles');
+    bundles = d.bundles;
+    $('#bList').innerHTML = bundles.map((b, i) =>
+      '<div class="bcard"><div class="nm"><b>' + esc(b.name) + '</b><span>' + esc(b.upc) + ' · ' + esc(b.qty) + ' left' + (b.cost != null ? ' · cost ' + esc(money(b.cost)) : '') + (b.startPrice ? ' · start ' + esc(money(b.startPrice)) : '') + '</span>' +
+      '<span>' + esc(bundleLines(b.contents).map((l) => l.count + '× ' + l.name).join('\n')) + '</span></div>' +
+      '<div class="row"><button class="btn small" data-bprint="' + i + '" type="button">Print label</button>' +
+      '<button class="btn small" data-bdel="' + i + '" type="button">Delete</button></div></div>'
+    ).join('') || '<p class="mut">No bundles yet.</p>';
+  } catch (e) { $('#bList').innerHTML = '<p class="mut">' + esc(e.message) + '</p>'; }
+}
+$('#bList').addEventListener('click', async (e) => {
+  const t = e.target.closest('button'); if (!t) return;
+  if (t.dataset.bprint) printLabel(bundles[+t.dataset.bprint], $('#bSize').value);
+  if (t.dataset.bdel) {
+    const b = bundles[+t.dataset.bdel];
+    if (!confirm('Delete bundle "' + b.name + '"? Past sales stay in your reports.')) return;
+    try { await api('bundles?id=' + encodeURIComponent(b.id), { method: 'DELETE' }); loadBundles(); } catch (err) { toast(err.message, 'bad'); }
+  }
+});
+$('#bRefresh').onclick = loadBundles;
+renderBuilder();
+
 // ---------- TEST ----------
-const testOn = () => localStorage.getItem('bat_test') === '1';
-function syncTest() { $('#testMode').checked = testOn(); $('#testBar').hidden = !testOn(); }
-$('#testMode').onchange = (e) => { localStorage.setItem('bat_test', e.target.checked ? '1' : '0'); syncTest(); };
+let testMode = false; // never saved — off after every reload
+try { localStorage.removeItem('bat_test'); } catch (e) {}
+function syncTest() { $('#testMode').checked = testMode; $('#testBar').hidden = !testMode; }
+$('#testMode').onchange = (e) => { testMode = e.target.checked; syncTest(); };
 syncTest();
 
 $('#simBtn').onclick = async () => {
