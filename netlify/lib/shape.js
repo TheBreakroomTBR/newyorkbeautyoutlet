@@ -30,6 +30,11 @@ function product(r) {
     cost: f.Cost ?? null,
     qty: f['Qty On Hand'] ?? 0,
     image: f['Image URL'] || '',
+    sku: f.SKU || '',
+    startPrice: f['Start Price'] ?? null,
+    isBundle: !!f['Is Bundle'],
+    contents: f['Bundle Contents'] || '',
+    components: f.Components || [],
   };
 }
 

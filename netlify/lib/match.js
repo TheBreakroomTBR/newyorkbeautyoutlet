@@ -22,12 +22,36 @@ async function findOrderRow(orderId) {
   return rows[0];
 }
 
+// Bundle contents lines look like "814655034682 ×2 — Name". Returns {upc: count}.
+function bundleCounts(text) {
+  const out = {};
+  String(text || '').split(/\n/).forEach((line) => {
+    const m = line.match(/^\s*(\d{12})\s*[×xX*]\s*(\d+)/);
+    if (m) out[m[1]] = (out[m[1]] || 0) + Number(m[2]);
+  });
+  return out;
+}
+
+// Adjusts a product's stock; for a bundle, also adjusts every item inside it.
+async function adjustProductQty(productId, delta) {
+  const p = await at.get(T.products, productId);
+  const updates = [{ id: p.id, fields: { 'Qty On Hand': Number(p.fields['Qty On Hand'] || 0) + delta } }];
+  const comps = p.fields.Components || [];
+  if (comps.length) {
+    const counts = bundleCounts(p.fields['Bundle Contents']);
+    for (const cid of comps) {
+      const c = await at.get(T.products, cid);
+      const n = counts[c.fields.UPC] || 1;
+      updates.push({ id: c.id, fields: { 'Qty On Hand': Number(c.fields['Qty On Hand'] || 0) + delta * n } });
+    }
+  }
+  await at.update(T.products, updates); // negatives allowed: they flag a miscount
+}
+
 async function adjustQty(auctionRec, delta) {
   const link = auctionRec.fields.Product;
   if (!link || !link.length) return; // unknown UPC — nothing to adjust
-  const p = await at.get(T.products, link[0]);
-  const q = Number(p.fields['Qty On Hand'] || 0) + delta; // negatives allowed: they flag a miscount
-  await at.update(T.products, [{ id: p.id, fields: { 'Qty On Hand': q } }]);
+  await adjustProductQty(link[0], delta);
 }
 
 async function assign(auctionRec, orderRowId, o) {
@@ -141,4 +165,4 @@ async function manualAssign(orderRowId, auctionRecId) {
   return { ok: true };
 }
 
-module.exports = { processOrder, manualAssign, isCanceled };
+module.exports = { processOrder, manualAssign, isCanceled, adjustProductQty, bundleCounts };

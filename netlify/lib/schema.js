@@ -38,7 +38,13 @@ async function setupTables() {
 
   const products = await make('Products', [
     text('UPC'), text('Name'), text('Brand'), text('Category'), money('Cost'), int('Qty On Hand'), url('Image URL'),
+    text('SKU'), money('Start Price'), check('Is Bundle'), long('Bundle Contents'),
   ]);
+  if (!byName.Products) {
+    // Bundles link to the products inside them (a self-link, so it's added after the table exists).
+    const r = await fetch(`${META}/${products.id}/fields`, { method: 'POST', headers: H, body: JSON.stringify({ name: 'Components', type: 'multipleRecordLinks', options: { linkedTableId: products.id } }) });
+    if (!r.ok) log.push('Products: could not add Components field — add it by hand (link to Products)');
+  }
 
   await make('Auctions', [
     text('Auction Key'), text('UPC'),
