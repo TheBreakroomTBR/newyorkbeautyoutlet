@@ -115,6 +115,12 @@ async function getOrder(orderId) {
   return (d.orders || [])[0];
 }
 
+async function recentOrders(n = 5) {
+  const d = await call('POST', '/order/202309/orders/search',
+    { page_size: String(n), sort_field: 'create_time', sort_order: 'DESC' }, {});
+  return d.orders || [];
+}
+
 // Optional filter: only orders on your auction listing(s).
 function isAuctionOrder(ord) {
   const ids = String(process.env.AUCTION_PRODUCT_IDS || '').split(',').map((s) => s.trim()).filter(Boolean);
@@ -148,4 +154,4 @@ function verifyWebhook(rawBody, header) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
-module.exports = { exchangeCode, fetchAndStoreShop, getOrder, mapOrder, isAuctionOrder, verifyWebhook, readSettings, APP_KEY };
+module.exports = { exchangeCode, fetchAndStoreShop, getOrder, recentOrders, mapOrder, isAuctionOrder, verifyWebhook, readSettings, APP_KEY };

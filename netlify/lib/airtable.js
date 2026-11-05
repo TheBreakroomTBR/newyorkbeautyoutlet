@@ -64,6 +64,12 @@ async function list(table, { filter, sort, max, fields } = {}) {
 async function get(table, id) { return req('GET', table, `/${id}`); }
 async function del(table, id) { return req('DELETE', table, `/${id}`); }
 
+async function delMany(table, ids) {
+  for (const c of chunk(ids, 10)) {
+    await req('DELETE', table, '', { query: c.map((id) => ['records[]', id]) });
+  }
+}
+
 async function create(table, fieldsList) {
   const out = [];
   for (const c of chunk(fieldsList, 10)) {
@@ -93,4 +99,4 @@ async function upsert(table, fieldsList, mergeOn) {
   return out;
 }
 
-module.exports = { T, esc, list, get, del, create, update, upsert };
+module.exports = { T, esc, list, get, del, delMany, create, update, upsert };
