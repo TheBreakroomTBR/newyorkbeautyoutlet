@@ -4,7 +4,7 @@
 // POST {action:'clear'}          → delete simulated test sales and put their stock back
 const at = require('../lib/airtable');
 const tiktok = require('../lib/tiktok');
-const { processOrder } = require('../lib/match');
+const { processOrder, adjustProductQty } = require('../lib/match');
 const { json, body, wrap } = require('../lib/http');
 const { T } = at;
 
@@ -53,8 +53,7 @@ exports.handler = wrap(async (event) => {
       auctionIds.push(a.id);
       const link = a.fields.Product;
       if (a.fields['Match Status'] === 'Sold' && link && link.length) {
-        const p = await at.get(T.products, link[0]);
-        await at.update(T.products, [{ id: p.id, fields: { 'Qty On Hand': Number(p.fields['Qty On Hand'] || 0) + 1 } }]);
+        await adjustProductQty(link[0], +1);
         restocked++;
       }
     }
