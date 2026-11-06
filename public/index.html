@@ -234,7 +234,10 @@ dialog::backdrop{background:rgba(60,30,36,.35);backdrop-filter:blur(3px)}
           <label class="f">Category<input id="pCat" type="text"></label>
           <label class="f">Cost ($)<input id="pCost" type="number" step="0.01" min="0"></label>
           <label class="f">Qty on hand<input id="pQty" type="number" step="1"></label>
-          <label class="f full">Image URL<input id="pImg" type="text"></label>
+          <label class="f full">Image URL
+            <span class="row" style="flex-wrap:nowrap"><input id="pImg" type="text" style="flex:1" placeholder="Paste an image address">
+            <button class="btn small" id="pFind" type="button">Find photo</button></span></label>
+          <div class="full" id="pPrev" hidden><img alt="" style="max-height:120px;max-width:100%;border-radius:10px;border:1px solid var(--line)"></div>
         </div>
         <div class="row" style="margin-top:12px">
           <button class="btn gold" id="pSave" type="button">Save product</button>
@@ -257,8 +260,10 @@ dialog::backdrop{background:rgba(60,30,36,.35);backdrop-filter:blur(3px)}
     <div class="panel">
       <div class="row" style="justify-content:space-between;margin-bottom:10px">
         <h3 style="margin:0">Catalog</h3>
+        <button class="btn small" id="fillPhotos" type="button">Fill missing photos</button>
         <input id="pSearch" type="text" placeholder="Search name, brand, or UPC" style="flex:1;max-width:320px">
       </div>
+      <div id="fillStatus" class="mut" style="font-size:13px;margin:-2px 0 8px" hidden></div>
       <div class="tablewrap"><table>
         <thead><tr><th></th><th>Name</th><th>Brand</th><th>UPC</th><th class="num">Cost</th><th class="num">Qty</th></tr></thead>
         <tbody id="catBody"></tbody>
@@ -660,8 +665,55 @@ $('#noSaleOld').onclick = async () => {
 
 // ---------- PRODUCTS ----------
 const pf = { upc: $('#pUpc'), name: $('#pName'), brand: $('#pBrand'), category: $('#pCat'), cost: $('#pCost'), qty: $('#pQty'), image: $('#pImg') };
-function fillForm(p) { Object.keys(pf).forEach((k) => { if (p[k] !== undefined && p[k] !== null) pf[k].value = p[k]; }); }
-function clearForm() { Object.values(pf).forEach((i) => i.value = ''); $('#pMsg').textContent = ''; pf.upc.focus(); }
+function showPrev() {
+  const u = pf.image.value.trim();
+  $('#pPrev').hidden = !/^https?:\/\//.test(u);
+  if (!$('#pPrev').hidden) $('#pPrev img').src = u;
+}
+pf.image.addEventListener('input', showPrev);
+$('#pFind').onclick = () => {
+  const q = [pf.brand.value, pf.name.value].filter(Boolean).join(' ').trim() || pf.upc.value.trim();
+  if (!q) return toast('Load a product first', 'warn');
+  window.open('https://www.google.com/search?tbm=isch&q=' + encodeURIComponent(q), '_blank', 'noopener');
+  toast('Right-click the photo you want → “Copy image address”, then paste it into Image URL and save.');
+};
+
+// Bulk: look up every product without a photo in the UPC database (free tier ≈ 100/day, ~6/min).
+let filling = false;
+$('#fillPhotos').onclick = async () => {
+  if (filling) { filling = false; return; }
+  const st = $('#fillStatus');
+  try {
+    const d = await api('products');
+    const todo = d.products.filter((p) => !p.image && !p.isBundle);
+    if (!todo.length) return toast('Every product already has a photo', 'ok');
+    filling = true; $('#fillPhotos').textContent = 'Stop'; st.hidden = false;
+    let found = 0, missed = [];
+    for (let i = 0; i < todo.length && filling; i++) {
+      const p = todo[i];
+      st.textContent = 'Looking up ' + (i + 1) + ' of ' + todo.length + ': ' + p.name + ' · ' + found + ' found';
+      let l;
+      for (let tries = 0; tries < 3; tries++) {
+        try { l = await api('upc-lookup?upc=' + p.upc); break; }
+        catch (e) {
+          if (/limit/i.test(e.message)) { st.textContent = 'Lookup limit hit — waiting a minute, then continuing…'; await sleep(65000); continue; }
+          l = null; break;
+        }
+      }
+      if (l && l.found && l.image) {
+        await api('products', { method: 'POST', body: { records: [{ upc: p.upc, image: l.image }] } });
+        found++;
+      } else missed.push(p.name);
+      await sleep(10500); // stay under the free tier's per-minute cap
+    }
+    st.textContent = 'Done: ' + found + ' photos added' + (missed.length ? ' · ' + missed.length + ' not found — open those products and use Find photo' : '') + '.';
+    searchProducts();
+  } catch (e) { toast(e.message, 'bad'); }
+  filling = false; $('#fillPhotos').textContent = 'Fill missing photos';
+};
+
+function fillForm(p) { Object.keys(pf).forEach((k) => { if (p[k] !== undefined && p[k] !== null) pf[k].value = p[k]; }); showPrev(); }
+function clearForm() { Object.values(pf).forEach((i) => i.value = ''); $('#pMsg').textContent = ''; showPrev(); pf.upc.focus(); }
 $('#pClear').onclick = clearForm;
 
 async function loadUpc() {
