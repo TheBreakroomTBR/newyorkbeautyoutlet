@@ -32,11 +32,12 @@ function bundleCounts(text) {
   return out;
 }
 
-// Adjusts a product's stock; for a bundle, also adjusts every item inside it.
+// Adjusts stock. A bundle is a permanent label with no stock of its own,
+// so only the items inside it move (each by its count in the bundle).
 async function adjustProductQty(productId, delta) {
   const p = await at.get(T.products, productId);
-  const updates = [{ id: p.id, fields: { 'Qty On Hand': Number(p.fields['Qty On Hand'] || 0) + delta } }];
   const comps = p.fields.Components || [];
+  const updates = [];
   if (comps.length) {
     const counts = bundleCounts(p.fields['Bundle Contents']);
     for (const cid of comps) {
@@ -44,6 +45,8 @@ async function adjustProductQty(productId, delta) {
       const n = counts[c.fields.UPC] || 1;
       updates.push({ id: c.id, fields: { 'Qty On Hand': Number(c.fields['Qty On Hand'] || 0) + delta * n } });
     }
+  } else {
+    updates.push({ id: p.id, fields: { 'Qty On Hand': Number(p.fields['Qty On Hand'] || 0) + delta } });
   }
   await at.update(T.products, updates); // negatives allowed: they flag a miscount
 }

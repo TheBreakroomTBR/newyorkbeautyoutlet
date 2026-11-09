@@ -99,4 +99,21 @@ async function upsert(table, fieldsList, mergeOn) {
   return out;
 }
 
-module.exports = { T, esc, list, get, del, delMany, create, update, upsert };
+// Find a product by UPC or SKU (typed or scanned).
+async function findByCode(code) {
+  const { normUpc, normSku } = require('./util');
+  const raw = String(code ?? '').trim();
+  if (!raw) return null;
+  const digits = raw.replace(/\D/g, '');
+  if (/^\d+$/.test(raw) && digits.length >= 11) {
+    const [hit] = await module.exports.list(T.products, { filter: `{UPC}="${normUpc(raw)}"`, max: 1 });
+    if (hit) return hit;
+  }
+  // Small catalog: compare SKUs in code so "3468", "03468" and "dt04086" all match.
+  const want = normSku(raw);
+  const rows = await module.exports.list(T.products, { filter: `{SKU}!=""` });
+  const bySku = rows.find((r) => normSku(r.fields.SKU) === want);
+  return bySku || null;
+}
+
+module.exports = { T, esc, list, get, del, delMany, create, update, upsert, findByCode };

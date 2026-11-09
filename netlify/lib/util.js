@@ -20,4 +20,7 @@ function clockTime(ms) {
 
 const num = (v) => { const n = Number(v); return Number.isFinite(n) ? n : null; };
 
-module.exports = { normUpc, streamDate, clockTime, num, TZ };
+// SKUs are compared case-insensitively and without leading zeros ("03468" = "3468").
+const normSku = (v) => String(v ?? '').trim().toUpperCase().replace(/\.0+$/, '').replace(/^0+(?=.)/, '');
+
+module.exports = { normUpc, normSku, streamDate, clockTime, num, TZ };
