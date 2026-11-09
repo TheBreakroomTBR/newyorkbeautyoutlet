@@ -57,8 +57,22 @@ async function adjustQty(auctionRec, delta) {
   await adjustProductQty(link[0], delta);
 }
 
+// Next sale number in this stream (1, 2, 3…). Printed big on the pick label.
+async function nextSaleNumber(streamId) {
+  if (!streamId) return null;
+  const rows = await at.list(T.auctions, {
+    filter: `AND({Stream ID}="${at.esc(streamId)}",{Sale Number}>0)`,
+    sort: [{ field: 'Sale Number', direction: 'desc' }],
+    max: 1,
+  });
+  return (rows[0] ? Number(rows[0].fields['Sale Number']) : 0) + 1;
+}
+
 async function assign(auctionRec, orderRowId, o) {
   const canceled = isCanceled(o.status);
+  const saleNumber = !canceled && !auctionRec.fields['Sale Number']
+    ? await nextSaleNumber(auctionRec.fields['Stream ID'] || auctionRec.fields['Stream Date'])
+    : null;
   await at.update(T.auctions, [{
     id: auctionRec.id,
     fields: {
@@ -68,6 +82,7 @@ async function assign(auctionRec, orderRowId, o) {
       'Order Status': o.status || '',
       'Matched At': new Date().toISOString(),
       'Match Status': canceled ? 'Canceled' : 'Sold',
+      ...(saleNumber ? { 'Sale Number': saleNumber } : {}),
     },
   }]);
   await at.update(T.orders, [{

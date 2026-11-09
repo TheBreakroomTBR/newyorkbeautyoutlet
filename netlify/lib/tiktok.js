@@ -138,7 +138,8 @@ function mapOrder(ord) {
     createdMs: Number(ord.create_time) * 1000,
     price: Math.round(price * 100) / 100,
     status: ord.status || '',
-    buyer: ord.buyer_email || ord.user_id || '',
+    // Recipient name matches what's on the shipping label, which makes packing easy.
+    buyer: ord.recipient_address?.name || ord.buyer_email || ord.user_id || '',
     source: 'tiktok-webhook',
     raw: JSON.stringify(ord),
   };

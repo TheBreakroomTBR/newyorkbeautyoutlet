@@ -54,7 +54,7 @@ async function setupTables() {
     select('Match Status', ['Open', 'Sold', 'No Sale', 'Canceled']),
     check('Unknown'),
     text('Order ID'), money('Sale Price'), text('Buyer'), text('Order Status'), when('Matched At'),
-    int('Units'), long('Bundle Items'),
+    int('Units'), long('Bundle Items'), int('Sale Number'), text('Stream ID'),
   ]);
 
   await make('Orders', [
