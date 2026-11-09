@@ -17,6 +17,7 @@ function auction(r) {
     buyer: f.Buyer || '',
     orderStatus: f['Order Status'] || '',
     units: f.Units || 1,
+    startPrice: f['Start Price'] ?? null,
     saleNumber: f['Sale Number'] || null,
     streamId: f['Stream ID'] || '',
     bundleItems: (() => { try { return f['Bundle Items'] ? JSON.parse(f['Bundle Items']) : null; } catch (e) { return null; } })(),

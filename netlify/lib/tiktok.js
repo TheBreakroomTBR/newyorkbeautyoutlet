@@ -128,6 +128,13 @@ function isAuctionOrder(ord) {
   return (ord.line_items || []).some((li) => ids.includes(String(li.product_id)));
 }
 
+function buyerName(ord) {
+  const u = ord.buyer_nickname || ord.buyer_username || ord.buyer_user_name || ord.user_nickname || ord.nickname
+    || ord.buyer_info?.nickname || ord.buyer_info?.username || ord.buyer?.nickname || ord.buyer?.username;
+  if (u) return String(u).startsWith('@') ? String(u) : '@' + u;
+  return ord.recipient_address?.name || ord.buyer_email || ord.user_id || '';
+}
+
 function mapOrder(ord) {
   const items = ord.line_items || [];
   // Winning bid = product subtotal (no shipping/tax). Falls back to summing line items.
@@ -138,8 +145,8 @@ function mapOrder(ord) {
     createdMs: Number(ord.create_time) * 1000,
     price: Math.round(price * 100) / 100,
     status: ord.status || '',
-    // Recipient name matches what's on the shipping label, which makes packing easy.
-    buyer: ord.recipient_address?.name || ord.buyer_email || ord.user_id || '',
+    // TikTok username first (for the customer's pick label); falls back to the recipient name.
+    buyer: buyerName(ord),
     source: 'tiktok-webhook',
     raw: JSON.stringify(ord),
   };
