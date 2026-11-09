@@ -54,3 +54,7 @@
   from = "/api/bundles"
   to = "/.netlify/functions/bundles"
   status = 200
+[[redirects]]
+  from = "/api/qz"
+  to = "/.netlify/functions/qz"
+  status = 200
