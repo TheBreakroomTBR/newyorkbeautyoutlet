@@ -55,6 +55,7 @@ exports.handler = wrap(async (event) => {
   }
   if (p) {
     fields.Product = [p.id];
+    if (p.fields['Start Price'] != null) fields['Start Price'] = p.fields['Start Price'];
     if (p.fields.Cost != null && fields.Cost == null) fields.Cost = p.fields.Cost;
     if (p.fields['Image URL']) fields['Image URL'] = p.fields['Image URL'];
   }
