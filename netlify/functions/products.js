@@ -12,6 +12,10 @@ exports.handler = wrap(async (event) => {
   const qs = event.queryStringParameters || {};
 
   if (event.httpMethod === 'GET') {
+    if (qs.code) {
+      const p = await at.findByCode(qs.code);
+      return json(200, { product: p ? shape.product(p) : null });
+    }
     if (qs.upc) {
       const upc = normUpc(qs.upc);
       const [p] = await at.list(T.products, { filter: `{UPC}="${upc}"`, max: 1 });

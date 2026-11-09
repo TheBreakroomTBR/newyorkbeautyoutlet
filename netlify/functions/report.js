@@ -11,7 +11,7 @@ exports.handler = wrap(async (event) => {
   const rows = await at.list(at.T.auctions, {
     filter: `AND({Scanned Ms}>=${from},{Scanned Ms}<${to})`,
     sort: [{ field: 'Scanned Ms', direction: 'asc' }],
-    fields: ['UPC', 'Product Name', 'Brand', 'Cost', 'Scanned Ms', 'Stream Date', 'Match Status', 'Sale Price', 'Order ID', 'Unknown'],
+    fields: ['UPC', 'Product Name', 'Brand', 'Cost', 'Scanned Ms', 'Stream Date', 'Match Status', 'Sale Price', 'Order ID', 'Unknown', 'Units', 'Bundle Items'],
   });
   return json(200, { auctions: rows.map(shape.auction) });
 });
