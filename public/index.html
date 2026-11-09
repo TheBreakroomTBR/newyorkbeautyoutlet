@@ -192,9 +192,14 @@ dialog::backdrop{background:rgba(60,30,36,.35);backdrop-filter:blur(3px)}
     </div>
   </div>
   <div class="panel feed">
-    <div class="row" style="justify-content:space-between"><h3>This stream</h3><span class="mut" id="liveSync"></span></div>
+    <div class="row" style="justify-content:space-between;margin-bottom:6px"><h3 style="margin:0">This stream</h3>
+      <div class="row">
+        <label class="check" style="font-size:13px"><input type="checkbox" id="autoPrint"> Auto-print pick label on each sale</label>
+        <select id="pickSize" style="padding:6px 10px;font-size:13px"><option value="2.25x1.25">2.25″ × 1.25″</option><option value="4x6">4″ × 6″</option></select>
+        <span class="mut" id="liveSync" style="font-size:13px"></span>
+      </div></div>
     <div class="tablewrap"><table>
-      <thead><tr><th></th><th>Time</th><th>Item</th><th>Brand</th><th>Status</th><th class="num">Sale</th><th class="num">Cost</th><th class="num">Profit</th></tr></thead>
+      <thead><tr><th></th><th>#</th><th>Time</th><th>Item</th><th>Brand</th><th>Status</th><th class="num">Sale</th><th class="num">Cost</th><th class="num">Profit</th><th></th></tr></thead>
       <tbody id="feedBody"></tbody>
     </table></div>
   </div>
@@ -474,6 +479,55 @@ function refreshTab() {
   if (tab === 'bundles') { loadBundles(); setTimeout(() => $('#bScan').focus(), 50); }
 }
 
+// ---------- PICK LABELS ----------
+// One label per sale: big sale number + item + buyer + order. Stick it on the item, bag it, done.
+let autoPrint = localStorage.getItem('bat_autoprint') === '1';
+const printedIds = new Set(JSON.parse(localStorage.getItem('bat_printed') || '[]'));
+function rememberPrinted(id) {
+  printedIds.add(id);
+  localStorage.setItem('bat_printed', JSON.stringify([...printedIds].slice(-500)));
+}
+function pickHtml(a, size) {
+  const small = size !== '4x6';
+  const dims = small ? ['2.25in', '1.25in'] : ['4in', '6in'];
+  const items = a.bundleItems ? a.bundleItems.map((i) => i.count + '× ' + i.name) : [];
+  const ord = String(a.orderId || '');
+  return '<!doctype html><html><head><title>#' + esc(a.saleNumber) + '</title><style>' +
+    '@page{size:' + dims[0] + ' ' + dims[1] + ';margin:0}*{box-sizing:border-box}html,body{margin:0;font-family:Arial,Helvetica,sans-serif;color:#000}' +
+    '.l{width:' + dims[0] + ';height:' + dims[1] + ';padding:' + (small ? '0.05in 0.09in' : '0.3in') + ';display:flex;flex-direction:column;overflow:hidden}' +
+    '.top{display:flex;justify-content:space-between;align-items:flex-start}' +
+    '.n{font-weight:900;font-size:' + (small ? '30pt' : '96pt') + ';line-height:.95;letter-spacing:-1px}' +
+    '.meta{text-align:right;font-size:' + (small ? '6.5pt' : '12pt') + ';line-height:1.3}' +
+    '.nm{font-weight:700;font-size:' + (small ? '8pt' : '18pt') + ';line-height:1.15;margin-top:' + (small ? '2px' : '14px') + ';max-height:' + (small ? '2.3em' : 'none') + ';overflow:hidden}' +
+    '.b{font-size:' + (small ? '7.5pt' : '16pt') + ';margin-top:auto;display:flex;justify-content:space-between;gap:6px}' +
+    '.it{font-size:12pt;line-height:1.35;margin-top:10px}' +
+    '</style></head><body><div class="l">' +
+    '<div class="top"><div class="n">#' + esc(a.saleNumber) + '</div><div class="meta">' + esc(new Date(a.scannedMs).toLocaleDateString()) + '<br>' + esc(money(a.price)) + (a.units > 1 ? '<br>' + esc(a.units) + ' items' : '') + '</div></div>' +
+    '<div class="nm">' + esc(a.name) + '</div>' +
+    (!small && items.length ? '<div class="it">' + items.map(esc).join('<br>') + '</div>' : '') +
+    '<div class="b"><span><b>' + esc(a.buyer || '') + '</b></span><span>…' + esc(ord.slice(-6)) + '</span></div>' +
+    '</div></body></html>';
+}
+const pickQueue = [];
+let pickBusy = false;
+function queuePick(a) { pickQueue.push(a); rememberPrinted(a.id); runPickQueue(); }
+async function runPickQueue() {
+  if (pickBusy) return;
+  pickBusy = true;
+  while (pickQueue.length) {
+    const a = pickQueue.shift();
+    const f = document.createElement('iframe');
+    f.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0';
+    document.body.appendChild(f);
+    f.contentDocument.open(); f.contentDocument.write(pickHtml(a, $('#pickSize').value)); f.contentDocument.close();
+    await sleep(250);
+    try { f.contentWindow.focus(); f.contentWindow.print(); } catch (e) { toast('Couldn’t print label #' + a.saleNumber, 'bad'); }
+    await sleep(1500);
+    f.remove();
+  }
+  pickBusy = false;
+}
+
 // ---------- LIVE ----------
 let session = Number(localStorage.getItem('bat_session') || 0);
 if (session && Date.now() - session > 20 * 3600e3) session = 0;
@@ -483,13 +537,13 @@ let lastScan = { upc: '', t: 0 };
 let currentProduct = null; // product details from the last scan (has qty)
 
 async function doScan(raw) {
-  const upc = normUpc(raw);
+  const upc = String(raw || '').trim();
   if (!upc) return;
   const now = Date.now();
   if (upc === lastScan.upc && now - lastScan.t < 2500) return; // scanner double-read
   lastScan = { upc, t: now };
   try {
-    const d = await api('scan', { method: 'POST', body: { upc } });
+    const d = await api('scan', { method: 'POST', body: { upc, stream: session ? 's' + session : '' } });
     currentProduct = d.product;
     live.unshift(d.auction);
     renderLive(true);
@@ -551,7 +605,13 @@ function renderLive(flash) {
   const ids = new Set(sold.map((a) => a.id));
   let fresh = new Set();
   if (soldSeen) {
-    sold.forEach((a) => { if (!soldSeen.has(a.id)) { fresh.add(a.id); toast('Sold ' + money(a.price) + ' · ' + a.name, 'sale'); } });
+    sold.forEach((a) => {
+      if (!soldSeen.has(a.id)) {
+        fresh.add(a.id);
+        toast((a.saleNumber ? '#' + a.saleNumber + ' · ' : '') + 'Sold ' + money(a.price) + ' · ' + a.name, 'sale');
+        if (autoPrint && a.saleNumber && !printedIds.has(a.id)) queuePick(a);
+      }
+    });
   }
   soldSeen = ids;
 
@@ -567,7 +627,7 @@ function renderLive(flash) {
     const bUnits = bi ? bi.reduce((n, i) => n + i.count, 0) : 0;
     const qtyLeft = p ? (cur.status === 'Sold' ? p.qty - 1 : p.qty) : null;
     let state;
-    if (cur.status === 'Sold') state = '<div class="state sold">Sold for ' + esc(money(cur.price)) + (bUnits ? ' · ' + esc(money(cur.price / bUnits)) + ' each' : '') + '</div>';
+    if (cur.status === 'Sold') state = '<div class="state sold">' + (cur.saleNumber ? '#' + esc(cur.saleNumber) + ' · ' : '') + 'Sold for ' + esc(money(cur.price)) + (bUnits ? ' · ' + esc(money(cur.price / bUnits)) + ' each' : '') + '</div>';
     else if (cur.status === 'Canceled') state = '<div class="state cancel">Order canceled</div>';
     else state = '<div class="state wait">Waiting for the sale</div>';
     st.className = 'stage' + (flash || fresh.has(cur.id) ? ' flash' : '');
@@ -602,15 +662,33 @@ function renderLive(flash) {
     const label = a.status === 'Open' ? 'Waiting' : a.status;
     return '<tr class="' + (fresh.has(a.id) ? 'fresh' : '') + '">' +
       '<td><div class="thumb" style="' + (a.image ? 'background-image:url(&quot;' + esc(a.image) + '&quot;)' : '') + '"></div></td>' +
+      '<td style="font-family:var(--serif);font-weight:800;font-size:16px">' + (a.saleNumber ? '#' + esc(a.saleNumber) : '') + '</td>' +
       '<td>' + esc(tm(a.scannedMs)) + '</td><td class="name">' + esc(a.name) + (a.bundleItems ? '<div class="mut" style="font-size:12px;font-weight:400">' + esc(a.units + ' items' + (a.status === 'Sold' ? ' · ' + money(a.price / a.units) + ' each' : '')) + '</div>' : '') + '</td><td>' + esc(a.brand) + '</td>' +
       '<td><span class="pill ' + cls + '">' + esc(label) + '</span></td>' +
       '<td class="num">' + (a.status === 'Sold' || a.status === 'Canceled' ? esc(money(a.price)) : '') + '</td>' +
       '<td class="num">' + esc(money(a.cost)) + '</td>' +
-      '<td class="num" style="color:' + (pr === null ? 'inherit' : pr < 0 ? 'var(--bad)' : 'var(--ok)') + '">' + (pr === null ? '' : esc(money(pr))) + '</td></tr>';
-  }).join('') || '<tr><td colspan="8" class="mut">No scans yet this stream.</td></tr>';
+      '<td class="num" style="color:' + (pr === null ? 'inherit' : pr < 0 ? 'var(--bad)' : 'var(--ok)') + '">' + (pr === null ? '' : esc(money(pr))) + '</td>' +
+      '<td>' + (a.saleNumber ? '<button class="btn small" data-pick="' + esc(a.id) + '" type="button">Print</button>' : '') + '</td></tr>';
+  }).join('') || '<tr><td colspan="10" class="mut">No scans yet this stream.</td></tr>';
 }
 
 setInterval(() => { if (tab === 'live' && !document.hidden) loadLive(); }, 4000);
+
+$('#autoPrint').checked = autoPrint;
+$('#pickSize').value = localStorage.getItem('bat_picksize') || '2.25x1.25';
+$('#autoPrint').onchange = (e) => {
+  autoPrint = e.target.checked;
+  localStorage.setItem('bat_autoprint', autoPrint ? '1' : '0');
+  // Don't print sales that already happened when you switch it on.
+  if (autoPrint) live.filter((a) => a.status === 'Sold').forEach((a) => rememberPrinted(a.id));
+};
+$('#pickSize').onchange = (e) => localStorage.setItem('bat_picksize', e.target.value);
+$('#feedBody').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-pick]');
+  if (!b) return;
+  const a = live.find((x) => x.id === b.dataset.pick);
+  if (a) { pickQueue.push(a); runPickQueue(); }
+});
 
 // ---------- REVIEW ----------
 let reviewData = { open: [], orders: [] };
