@@ -387,14 +387,26 @@ dialog::backdrop{background:rgba(60,30,36,.35);backdrop-filter:blur(3px)}
   <div class="row" style="margin-top:12px;justify-content:flex-end"><button class="btn gold" id="passSave" type="button">Save</button></div>
 </dialog>
 
-<dialog id="setupDlg">
+<dialog id="setupDlg" style="max-width:480px">
   <h3>Set up Airtable</h3>
   <p class="mut">Creates the Products, Auctions, Orders, and Settings tables in your base. Tables that already exist are left alone, so it’s safe to run again.</p>
   <div class="log" id="setupLog" hidden></div>
   <div class="row" style="margin-top:12px;justify-content:flex-end">
-    <button class="btn" id="setupClose" type="button">Close</button>
     <button class="btn gold" id="setupRun" type="button">Create tables</button>
   </div>
+  <hr style="border:0;border-top:1px solid var(--line);margin:18px 0">
+  <h3>Silent label printing (QZ Tray)</h3>
+  <p class="mut" style="margin-top:0">Prints labels with no print window. Do this on the label laptop.</p>
+  <div class="mut" style="font-size:13px;margin-bottom:8px">1. Upload the two files QZ Tray created (one time, works for every device):</div>
+  <div class="row" style="font-size:13px"><span style="width:150px">digital-certificate.txt</span><input type="file" id="qzCertFile" accept=".txt,.crt,.pem"></div>
+  <div class="row" style="font-size:13px;margin-top:6px"><span style="width:150px">private-key.pem</span><input type="file" id="qzKeyFile" accept=".pem,.key,.txt"></div>
+  <div class="row" style="margin-top:8px"><button class="btn small" id="qzSave" type="button">Save keys</button></div>
+  <div class="mut" style="font-size:13px;margin:12px 0 8px">2. Connect and pick the label printer:</div>
+  <div class="row"><button class="btn small" id="qzConnectBtn" type="button">Connect to QZ Tray</button>
+    <select id="qzPrinter" style="flex:1;min-width:160px"><option value="">Windows default printer</option></select></div>
+  <label class="check" style="margin-top:10px;font-size:14px"><input type="checkbox" id="qzOn"> Use silent printing on this device</label>
+  <div class="row" style="margin-top:10px"><button class="btn small" id="qzTest" type="button">Print a test label</button><span class="mut" id="qzStatus" style="font-size:13px"></span></div>
+  <div class="row" style="margin-top:16px;justify-content:flex-end"><button class="btn" id="setupClose" type="button">Close</button></div>
 </dialog>
 
 <script>
@@ -463,6 +475,38 @@ $('#setupRun').onclick = async () => {
   $('#setupRun').disabled = false;
 };
 
+// ---------- Silent printing setup ----------
+$('#qzOn').checked = qzOn;
+$('#qzOn').onchange = (e) => { qzOn = e.target.checked; localStorage.setItem('bat_qz', qzOn ? '1' : '0'); };
+$('#qzPrinter').onchange = (e) => { qzPrinterName = e.target.value; localStorage.setItem('bat_qzprinter', qzPrinterName); };
+if (qzPrinterName) $('#qzPrinter').innerHTML += '<option value="' + esc(qzPrinterName) + '" selected>' + esc(qzPrinterName) + '</option>';
+$('#qzSave').onclick = async () => {
+  const cf = $('#qzCertFile').files[0], kf = $('#qzKeyFile').files[0];
+  if (!cf || !kf) return toast('Choose both files first', 'warn');
+  try {
+    await api('qz', { method: 'POST', body: { save: { cert: await readFile(cf), key: await readFile(kf) } } });
+    $('#qzStatus').textContent = 'Keys saved.';
+  } catch (e) { $('#qzStatus').textContent = e.message; }
+};
+$('#qzConnectBtn').onclick = async () => {
+  $('#qzStatus').textContent = 'Connecting…';
+  try {
+    await qzConnect();
+    const list = await qz.printers.find();
+    $('#qzPrinter').innerHTML = '<option value="">Windows default printer</option>' + list.map((n) => '<option value="' + esc(n) + '"' + (n === qzPrinterName ? ' selected' : '') + '>' + esc(n) + '</option>').join('');
+    $('#qzStatus').textContent = 'Connected. Pick your label printer.';
+  } catch (e) { $('#qzStatus').textContent = String(e.message || e); }
+};
+$('#qzTest').onclick = async () => {
+  $('#qzStatus').textContent = 'Printing…';
+  const size = $('#pickSize').value;
+  const [w, h] = sizeInches(size);
+  try {
+    await qzPrint(pickHtml({ saleNumber: 1, name: 'Test label — silent printing works', price: 1, buyer: 'Test', orderId: '000000', units: 1, scannedMs: Date.now() }, size), w, h, 1);
+    $('#qzStatus').textContent = 'Sent. If no window popped up, you’re set.';
+  } catch (e) { $('#qzStatus').textContent = String(e.message || e); }
+};
+
 // ---------- Tabs ----------
 let tab = 'live';
 $$('nav button').forEach((b) => b.onclick = () => go(b.dataset.go));
@@ -479,6 +523,50 @@ function refreshTab() {
   if (tab === 'bundles') { loadBundles(); setTimeout(() => $('#bScan').focus(), 50); }
 }
 
+// ---------- SILENT PRINTING (QZ Tray) ----------
+const QZ_SRC = 'https://cdn.jsdelivr.net/npm/qz-tray@2.3.0/qz-tray.js';
+let qzOn = localStorage.getItem('bat_qz') === '1';
+let qzPrinterName = localStorage.getItem('bat_qzprinter') || '';
+let qzSecured = false;
+const loadScript = (src) => new Promise((res, rej) => { const el = document.createElement('script'); el.src = src; el.onload = res; el.onerror = () => rej(new Error('Couldn’t load the QZ Tray library')); document.head.appendChild(el); });
+async function qzConnect() {
+  if (!window.qz) await loadScript(QZ_SRC);
+  if (!qzSecured) {
+    qz.security.setCertificatePromise((resolve, reject) => { api('qz').then((d) => (d.cert ? resolve(d.cert) : reject('No QZ keys saved yet'))).catch(reject); });
+    qz.security.setSignatureAlgorithm('SHA512');
+    qz.security.setSignaturePromise((toSign) => (resolve, reject) => { api('qz', { method: 'POST', body: { request: toSign } }).then((d) => resolve(d.signature)).catch(reject); });
+    qzSecured = true;
+  }
+  if (!qz.websocket.isActive()) {
+    try { await qz.websocket.connect({ retries: 2, delay: 1 }); }
+    catch (e) { throw new Error('QZ Tray isn’t running on this computer'); }
+  }
+}
+async function qzPrint(html, wIn, hIn, copies) {
+  await qzConnect();
+  const printer = qzPrinterName || await qz.printers.getDefault();
+  const cfg = qz.configs.create(printer, { units: 'in', size: { width: wIn, height: hIn }, margins: 0, colorType: 'blackwhite', scaleContent: true, copies: Math.max(1, copies || 1) });
+  await qz.print(cfg, [{ type: 'pixel', format: 'html', flavor: 'plain', data: html }]);
+}
+const sizeInches = (size) => ({ '2.25x1.25': [2.25, 1.25], '4x6': [4, 6], letter: [8.5, 11] }[size] || [2.25, 1.25]);
+
+// Shared label layout: everything centered, with a safety margin so printers don't clip the edges.
+function labelDoc(title, dims, small, inner, copies) {
+  const pad = small ? 0.09 : 0.3;
+  const css = '@page{size:' + dims[0] + ' ' + dims[1] + ';margin:0}' +
+    '*{box-sizing:border-box}html,body{margin:0;padding:0;font-family:Arial,Helvetica,sans-serif;color:#000}' +
+    '.l{width:' + dims[0] + ';height:calc(' + dims[1] + ' - 0.04in);padding:' + pad + 'in;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;overflow:hidden;gap:' + (small ? '0.025in' : '0.12in') + '}' +
+    '.l:not(:last-child){break-after:page;page-break-after:always}' +
+    '.l>*{max-width:100%}' +
+    '.clamp2{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}';
+  const body = Array.from({ length: Math.max(1, copies || 1) }, () => '<div class="l">' + inner + '</div>').join('');
+  return { css, body, title };
+}
+function labelHtml(doc, extraCss, autoPrint) {
+  return '<!doctype html><html><head><title>' + esc(doc.title) + '</title><style>' + doc.css + (extraCss || '') + '</style></head><body>' + doc.body +
+    (autoPrint ? '<script>window.onload=function(){setTimeout(function(){window.print()},200)}<\/script>' : '') + '</body></html>';
+}
+
 // ---------- PICK LABELS ----------
 // One label per sale: big sale number + item + buyer + order. Stick it on the item, bag it, done.
 let autoPrint = localStorage.getItem('bat_autoprint') === '1';
@@ -492,21 +580,18 @@ function pickHtml(a, size) {
   const dims = small ? ['2.25in', '1.25in'] : ['4in', '6in'];
   const items = a.bundleItems ? a.bundleItems.map((i) => i.count + '× ' + i.name) : [];
   const ord = String(a.orderId || '');
-  return '<!doctype html><html><head><title>#' + esc(a.saleNumber) + '</title><style>' +
-    '@page{size:' + dims[0] + ' ' + dims[1] + ';margin:0}*{box-sizing:border-box}html,body{margin:0;font-family:Arial,Helvetica,sans-serif;color:#000}' +
-    '.l{width:' + dims[0] + ';height:' + dims[1] + ';padding:' + (small ? '0.05in 0.09in' : '0.3in') + ';display:flex;flex-direction:column;overflow:hidden}' +
-    '.top{display:flex;justify-content:space-between;align-items:flex-start}' +
-    '.n{font-weight:900;font-size:' + (small ? '30pt' : '96pt') + ';line-height:.95;letter-spacing:-1px}' +
-    '.meta{text-align:right;font-size:' + (small ? '6.5pt' : '12pt') + ';line-height:1.3}' +
-    '.nm{font-weight:700;font-size:' + (small ? '8pt' : '18pt') + ';line-height:1.15;margin-top:' + (small ? '2px' : '14px') + ';max-height:' + (small ? '2.3em' : 'none') + ';overflow:hidden}' +
-    '.b{font-size:' + (small ? '7.5pt' : '16pt') + ';margin-top:auto;display:flex;justify-content:space-between;gap:6px}' +
-    '.it{font-size:12pt;line-height:1.35;margin-top:10px}' +
-    '</style></head><body><div class="l">' +
-    '<div class="top"><div class="n">#' + esc(a.saleNumber) + '</div><div class="meta">' + esc(new Date(a.scannedMs).toLocaleDateString()) + '<br>' + esc(money(a.price)) + (a.units > 1 ? '<br>' + esc(a.units) + ' items' : '') + '</div></div>' +
-    '<div class="nm">' + esc(a.name) + '</div>' +
+  const inner =
+    '<div class="n">#' + esc(a.saleNumber) + '</div>' +
+    '<div class="nm clamp2">' + esc(a.name) + '</div>' +
     (!small && items.length ? '<div class="it">' + items.map(esc).join('<br>') + '</div>' : '') +
-    '<div class="b"><span><b>' + esc(a.buyer || '') + '</b></span><span>…' + esc(ord.slice(-6)) + '</span></div>' +
-    '</div></body></html>';
+    '<div class="b">' + [a.buyer ? '<b>' + esc(a.buyer) + '</b>' : '', ord ? '…' + esc(ord.slice(-6)) : '', esc(money(a.price)) + (a.units > 1 ? ' · ' + esc(a.units) + ' items' : '')].filter(Boolean).join(' &nbsp;·&nbsp; ') + '</div>';
+  const doc = labelDoc('#' + a.saleNumber, dims, small, inner, 1);
+  const css =
+    '.n{font-weight:900;font-size:' + (small ? '26pt' : '90pt') + ';line-height:1;letter-spacing:-0.5px}' +
+    '.nm{font-weight:700;font-size:' + (small ? '7.5pt' : '18pt') + ';line-height:1.15}' +
+    '.it{font-size:12pt;line-height:1.35}' +
+    '.b{font-size:' + (small ? '6.5pt' : '14pt') + ';line-height:1.2}';
+  return labelHtml(doc, css, false);
 }
 const pickQueue = [];
 let pickBusy = false;
@@ -516,6 +601,11 @@ async function runPickQueue() {
   pickBusy = true;
   while (pickQueue.length) {
     const a = pickQueue.shift();
+    if (qzOn) {
+      const [w, h] = sizeInches($('#pickSize').value);
+      try { await qzPrint(pickHtml(a, $('#pickSize').value), w, h, 1); continue; }
+      catch (e) { toast('Silent print failed (' + (e.message || e) + ') — using Chrome instead', 'warn'); }
+    }
     const f = document.createElement('iframe');
     f.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0';
     document.body.appendChild(f);
@@ -1105,23 +1195,35 @@ function bundleLines(text) {
 
 function printLabel(b, size, copies) {
   const lines = bundleLines(b.contents);
+  const n = lines.reduce((k, l) => k + l.count, 0);
   const dims = { '2.25x1.25': ['2.25in', '1.25in'], '4x6': ['4in', '6in'], letter: ['8.5in', '11in'] }[size] || ['2.25in', '1.25in'];
   const small = size === '2.25x1.25';
-  const one = '<div class="lbl"><div class="t">' + esc(b.name) + '</div>' +
-    (small ? '<div class="c">' + lines.reduce((n, l) => n + l.count, 0) + ' items · reusable label' + (b.startPrice ? ' · start ' + esc(money(b.startPrice)) : '') + '</div>'
-           : '<div class="c">' + lines.map((l) => esc(l.count + '× ' + l.name)).join('<br>') + (b.startPrice ? '<br><b>Start ' + esc(money(b.startPrice)) + '</b>' : '') + '</div>') +
-    '<div class="bc">' + upcSvg(b.upc, { module: 2, height: small ? 34 : 70 }) + '</div></div>';
-  const count = Math.max(1, Math.min(100, Number(copies) || 1));
-  const html = '<!doctype html><html><head><title>' + esc(b.name) + '</title><style>' +
-    '@page{size:' + dims[0] + ' ' + dims[1] + ';margin:0}*{box-sizing:border-box}body{margin:0;font-family:Arial,Helvetica,sans-serif;color:#000}' +
-    '.lbl{width:' + dims[0] + ';height:' + dims[1] + ';padding:' + (small ? '0.06in 0.1in' : '0.3in') + ';display:flex;flex-direction:column;justify-content:space-between;page-break-after:always;overflow:hidden}' +
-    '.t{font-weight:700;font-size:' + (small ? '9pt' : '16pt') + ';line-height:1.15;max-height:' + (small ? '2.3em' : 'none') + ';overflow:hidden}' +
-    '.c{font-size:' + (small ? '7pt' : '11pt') + ';line-height:1.35;margin:2px 0}' +
-    '.bc svg{width:100%;height:auto;display:block;max-height:' + (small ? '0.62in' : '2in') + '}' +
-    '</style></head><body>' + one.repeat(count) + '<script>window.onload=function(){setTimeout(function(){window.print()},200)}<\/script></body></html>';
-  const w = window.open('', '_blank');
-  if (!w) return toast('Allow pop-ups for this site to print labels', 'warn');
-  w.document.open(); w.document.write(html); w.document.close();
+  const inner =
+    '<div class="t clamp2">' + esc(b.name) + '</div>' +
+    (small
+      ? '<div class="c">' + n + ' items' + (b.startPrice ? ' · start ' + esc(money(b.startPrice)) : '') + '</div>'
+      : '<div class="c">' + lines.map((l) => esc(l.count + '× ' + l.name)).join('<br>') + (b.startPrice ? '<br><b>Start ' + esc(money(b.startPrice)) + '</b>' : '') + '</div>') +
+    '<div class="bc">' + upcSvg(b.upc, { module: 2, height: small ? 34 : 70 }) + '</div>';
+  const doc = labelDoc(b.name, dims, small, inner, copies);
+  const css =
+    '.t{font-weight:700;font-size:' + (small ? '8pt' : '16pt') + ';line-height:1.15}' +
+    '.c{font-size:' + (small ? '6.5pt' : '11pt') + ';line-height:1.35}' +
+    '.bc{width:100%;display:flex;justify-content:center}' +
+    '.bc svg{width:' + (small ? '1.75in' : '100%') + ';height:auto;display:block;max-height:' + (small ? '0.55in' : '2in') + '}';
+  if (qzOn) {
+    const one = labelDoc(b.name, dims, small, inner, 1);
+    const [wi, hi] = sizeInches(size);
+    qzPrint(labelHtml(one, css, false), wi, hi, copies)
+      .then(() => toast('Label sent to printer', 'ok'))
+      .catch((e) => { toast('Silent print failed (' + (e.message || e) + ') — using Chrome instead', 'warn'); openPrintWindow(); });
+    return;
+  }
+  openPrintWindow();
+  function openPrintWindow() {
+    const w = window.open('', '_blank');
+    if (!w) return toast('Allow pop-ups for this site to print labels', 'warn');
+    w.document.open(); w.document.write(labelHtml(doc, css, true)); w.document.close();
+  }
 }
 
 // ---------- BUNDLES ----------
