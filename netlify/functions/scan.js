@@ -35,6 +35,7 @@ exports.handler = wrap(async (event) => {
     'Stream Date': streamDate(now),
     'Match Status': 'Open',
     Unknown: !p,
+    'Stream ID': String(body(event).stream || streamDate(now)).slice(0, 60),
   };
   fields.Units = 1;
   if (p && (p.fields.Components || []).length) {
