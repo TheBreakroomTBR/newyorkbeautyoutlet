@@ -20,6 +20,7 @@
   --shadow:0 1px 2px rgba(120,60,70,.06), 0 8px 24px rgba(160,90,100,.08);
 }
 *{box-sizing:border-box}
+[hidden]{display:none!important}
 html,body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);font-size:14.5px;line-height:1.5}
 body{background:radial-gradient(1200px 500px at 50% -200px,#fff6f6 0%,transparent 70%),var(--bg)}
 button,input,select{font:inherit;color:inherit}
@@ -187,7 +188,7 @@ dialog::backdrop{background:rgba(60,30,36,.35);backdrop-filter:blur(3px)}
       <div class="stat hero"><div class="v" id="sGross">$0.00</div><div class="k">Sold this stream</div></div>
       <div class="stat"><div class="v" id="sSold">0</div><div class="k">Items sold</div></div>
       <div class="stat"><div class="v" id="sAvg">—</div><div class="k">Average auction</div></div>
-      <div class="stat"><div class="v" id="sProfit">—</div><div class="k">Profit over cost</div></div>
+      <div class="stat"><div class="v" id="sWon">0</div><div class="k">Auctions won</div></div>
       <div class="stat"><div class="v" id="sPace">—</div><div class="k">Items per hour</div></div>
     </div>
   </div>
@@ -199,7 +200,7 @@ dialog::backdrop{background:rgba(60,30,36,.35);backdrop-filter:blur(3px)}
         <span class="mut" id="liveSync" style="font-size:13px"></span>
       </div></div>
     <div class="tablewrap"><table>
-      <thead><tr><th></th><th>#</th><th>Time</th><th>Item</th><th>Brand</th><th>Status</th><th class="num">Sale</th><th class="num">Cost</th><th class="num">Profit</th><th></th></tr></thead>
+      <thead><tr><th></th><th>#</th><th>Time</th><th>Item</th><th>Brand</th><th>Status</th><th class="num">Start</th><th class="num">Sale</th><th></th></tr></thead>
       <tbody id="feedBody"></tbody>
     </table></div>
   </div>
@@ -442,6 +443,11 @@ function toast(msg, kind = '') {
 
 // ---------- API ----------
 let PASS = localStorage.getItem('bat_pass') || '';
+// Silent printing (QZ Tray) settings for this device
+let qzOn = localStorage.getItem('bat_qz') === '1';
+let qzPrinterName = localStorage.getItem('bat_qzprinter') || '';
+let qzSecured = false;
+
 async function api(path, { method = 'GET', body } = {}) {
   const r = await fetch('/api/' + path, {
     method,
@@ -502,7 +508,7 @@ $('#qzTest').onclick = async () => {
   const size = $('#pickSize').value;
   const [w, h] = sizeInches(size);
   try {
-    await qzPrint(pickHtml({ saleNumber: 1, name: 'Test label — silent printing works', price: 1, buyer: 'Test', orderId: '000000', units: 1, scannedMs: Date.now() }, size), w, h, 1);
+    await qzPrint(pickHtml({ saleNumber: 1, name: 'Test label — silent printing works', buyer: '@tiktokuser' }, size), w, h, 1);
     $('#qzStatus').textContent = 'Sent. If no window popped up, you’re set.';
   } catch (e) { $('#qzStatus').textContent = String(e.message || e); }
 };
@@ -525,9 +531,6 @@ function refreshTab() {
 
 // ---------- SILENT PRINTING (QZ Tray) ----------
 const QZ_SRC = 'https://cdn.jsdelivr.net/npm/qz-tray@2.3.0/qz-tray.js';
-let qzOn = localStorage.getItem('bat_qz') === '1';
-let qzPrinterName = localStorage.getItem('bat_qzprinter') || '';
-let qzSecured = false;
 const loadScript = (src) => new Promise((res, rej) => { const el = document.createElement('script'); el.src = src; el.onload = res; el.onerror = () => rej(new Error('Couldn’t load the QZ Tray library')); document.head.appendChild(el); });
 async function qzConnect() {
   if (!window.qz) await loadScript(QZ_SRC);
@@ -575,22 +578,19 @@ function rememberPrinted(id) {
   printedIds.add(id);
   localStorage.setItem('bat_printed', JSON.stringify([...printedIds].slice(-500)));
 }
+// Customer-facing pick label: sale number, product name, TikTok username. Nothing else.
 function pickHtml(a, size) {
   const small = size !== '4x6';
   const dims = small ? ['2.25in', '1.25in'] : ['4in', '6in'];
-  const items = a.bundleItems ? a.bundleItems.map((i) => i.count + '× ' + i.name) : [];
-  const ord = String(a.orderId || '');
   const inner =
     '<div class="n">#' + esc(a.saleNumber) + '</div>' +
     '<div class="nm clamp2">' + esc(a.name) + '</div>' +
-    (!small && items.length ? '<div class="it">' + items.map(esc).join('<br>') + '</div>' : '') +
-    '<div class="b">' + [a.buyer ? '<b>' + esc(a.buyer) + '</b>' : '', ord ? '…' + esc(ord.slice(-6)) : '', esc(money(a.price)) + (a.units > 1 ? ' · ' + esc(a.units) + ' items' : '')].filter(Boolean).join(' &nbsp;·&nbsp; ') + '</div>';
+    (a.buyer ? '<div class="u">' + esc(a.buyer) + '</div>' : '');
   const doc = labelDoc('#' + a.saleNumber, dims, small, inner, 1);
   const css =
     '.n{font-weight:900;font-size:' + (small ? '26pt' : '90pt') + ';line-height:1;letter-spacing:-0.5px}' +
-    '.nm{font-weight:700;font-size:' + (small ? '7.5pt' : '18pt') + ';line-height:1.15}' +
-    '.it{font-size:12pt;line-height:1.35}' +
-    '.b{font-size:' + (small ? '6.5pt' : '14pt') + ';line-height:1.2}';
+    '.nm{font-weight:700;font-size:' + (small ? '8pt' : '20pt') + ';line-height:1.15}' +
+    '.u{font-size:' + (small ? '8pt' : '18pt') + ';line-height:1.2}';
   return labelHtml(doc, css, false);
 }
 const pickQueue = [];
@@ -727,7 +727,7 @@ function renderLive(flash) {
       '<div class="name">' + esc(cur.name) + '</div>' +
       '<div class="brandline">' + esc(bi ? 'Bundle · ' + bUnits + ' items' : (cur.brand || (cur.unknown ? 'Not in catalog yet' : ''))) + '</div>' +
       (bi ? '<div class="contents">' + esc(bi.map((l) => l.count + '× ' + l.name).join('\n')) + '</div>' : '') +
-      '<div class="facts"><div><b>' + esc(tm(cur.scannedMs)) + '</b>Went up</div><div><b>' + esc(money(cur.cost)) + '</b>Cost</div>' +
+      '<div class="facts"><div><b>' + esc(tm(cur.scannedMs)) + '</b>Went up</div><div><b>' + esc(money(cur.startPrice)) + '</b>Start price</div>' +
       (qtyLeft !== null ? '<div><b>' + esc(qtyLeft) + '</b>Left in stock</div>' : '') +
       '<div><b>' + esc(cur.upc) + '</b>UPC</div></div>' + state + '</div>';
   }
@@ -740,7 +740,7 @@ function renderLive(flash) {
   const unitsSold = sold.reduce((n, a) => n + (a.units || 1), 0);
   $('#sSold').textContent = unitsSold;
   $('#sAvg').textContent = sold.length ? money(gross / sold.length) : '—';
-  $('#sProfit').textContent = costed.length ? money(profit) : '—';
+  $('#sWon').textContent = sold.length;
   const first = live.length ? live[live.length - 1].scannedMs : 0;
   const hrs = first ? (Date.now() - first) / 3600e3 : 0;
   $('#sPace').textContent = hrs > 0.1 ? (unitsSold / hrs).toFixed(1) : '—';
@@ -755,11 +755,10 @@ function renderLive(flash) {
       '<td style="font-family:var(--serif);font-weight:800;font-size:16px">' + (a.saleNumber ? '#' + esc(a.saleNumber) : '') + '</td>' +
       '<td>' + esc(tm(a.scannedMs)) + '</td><td class="name">' + esc(a.name) + (a.bundleItems ? '<div class="mut" style="font-size:12px;font-weight:400">' + esc(a.units + ' items' + (a.status === 'Sold' ? ' · ' + money(a.price / a.units) + ' each' : '')) + '</div>' : '') + '</td><td>' + esc(a.brand) + '</td>' +
       '<td><span class="pill ' + cls + '">' + esc(label) + '</span></td>' +
-      '<td class="num">' + (a.status === 'Sold' || a.status === 'Canceled' ? esc(money(a.price)) : '') + '</td>' +
-      '<td class="num">' + esc(money(a.cost)) + '</td>' +
-      '<td class="num" style="color:' + (pr === null ? 'inherit' : pr < 0 ? 'var(--bad)' : 'var(--ok)') + '">' + (pr === null ? '' : esc(money(pr))) + '</td>' +
+      '<td class="num mut">' + esc(money(a.startPrice)) + '</td>' +
+      '<td class="num" style="font-weight:600">' + (a.status === 'Sold' || a.status === 'Canceled' ? esc(money(a.price)) : '') + '</td>' +
       '<td>' + (a.saleNumber ? '<button class="btn small" data-pick="' + esc(a.id) + '" type="button">Print</button>' : '') + '</td></tr>';
-  }).join('') || '<tr><td colspan="10" class="mut">No scans yet this stream.</td></tr>';
+  }).join('') || '<tr><td colspan="9" class="mut">No scans yet this stream.</td></tr>';
 }
 
 setInterval(() => { if (tab === 'live' && !document.hidden) loadLive(); }, 4000);
@@ -1245,7 +1244,7 @@ $('#bScan').addEventListener('keydown', (e) => { if (e.key === 'Enter') { e.prev
 
 function renderBuilder() {
   $('#bItems').innerHTML = bItems.map((it, i) =>
-    '<div class="bitem"><div class="nm"><b>' + esc(it.name) + '</b><span>' + (it.sku ? 'SKU ' + esc(it.sku) + ' · ' : '') + esc(it.brand) + ' · ' + esc(it.upc) + ' · cost ' + esc(money(it.cost)) + ' · ' + esc(it.qty) + ' in stock</span></div>' +
+    '<div class="bitem"><div class="nm"><b>' + esc(it.name) + '</b><span>' + (it.sku ? 'SKU ' + esc(it.sku) + ' · ' : '') + esc(it.brand) + ' · ' + esc(it.upc) + ' · start ' + esc(money(it.startPrice)) + ' · ' + esc(it.qty) + ' in stock</span></div>' +
     '<button class="qtybtn" data-bminus="' + i + '" type="button" aria-label="One fewer">−</button><b style="min-width:22px;text-align:center">' + it.count + '</b>' +
     '<button class="qtybtn" data-bplus="' + i + '" type="button" aria-label="One more">+</button>' +
     '<button class="btn small" data-bremove="' + i + '" type="button">Remove</button></div>'
@@ -1254,7 +1253,7 @@ function renderBuilder() {
   const costKnown = bItems.length && bItems.every((it) => it.cost !== null && it.cost !== undefined);
   const cost = bItems.reduce((a, it) => a + Number(it.cost || 0) * it.count, 0);
   const start = bItems.reduce((a, it) => a + Number(it.startPrice || 0) * it.count, 0);
-  $('#bSum').innerHTML = '<div><b>' + n + '</b>Items</div><div><b>' + (costKnown ? esc(money(cost)) : '—') + '</b>Total cost</div><div><b>' + (start ? esc(money(start)) : '—') + '</b>Items’ start prices</div>';
+  $('#bSum').innerHTML = '<div><b>' + n + '</b>Items</div><div><b>' + (start ? esc(money(start)) : '—') + '</b>Items’ start prices</div>';
   if (n > 10) toast('Bundles hold up to 10 items', 'warn');
   $('#bCreate').disabled = n < 2 || n > 10;
 }
@@ -1290,7 +1289,7 @@ async function loadBundles() {
     const d = await api('bundles');
     bundles = d.bundles;
     $('#bList').innerHTML = bundles.map((b, i) =>
-      '<div class="bcard"><div class="nm"><b>' + esc(b.name) + '</b><span>' + esc(b.upc) + ' · ' + bundleLines(b.contents).reduce((n, l) => n + l.count, 0) + ' items · can make ' + esc(b.available) + ' more' + (b.cost != null ? ' · cost ' + esc(money(b.cost)) : '') + (b.startPrice ? ' · start ' + esc(money(b.startPrice)) : '') + '</span>' +
+      '<div class="bcard"><div class="nm"><b>' + esc(b.name) + '</b><span>' + esc(b.upc) + ' · ' + bundleLines(b.contents).reduce((n, l) => n + l.count, 0) + ' items · can make ' + esc(b.available) + ' more' + (b.startPrice ? ' · start ' + esc(money(b.startPrice)) : '') + '</span>' +
       '<span>' + esc(bundleLines(b.contents).map((l) => l.count + '× ' + l.name).join('\n')) + '</span></div>' +
       '<div class="row"><button class="btn small" data-bprint="' + i + '" type="button">Print label</button>' +
       '<button class="btn small" data-bdel="' + i + '" type="button">Delete</button></div></div>'
