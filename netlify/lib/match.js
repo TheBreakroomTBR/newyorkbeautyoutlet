@@ -53,8 +53,19 @@ async function adjustProductQty(productId, delta) {
 
 async function adjustQty(auctionRec, delta) {
   const link = auctionRec.fields.Product;
-  if (!link || !link.length) return; // unknown UPC — nothing to adjust
-  await adjustProductQty(link[0], delta);
+  if (link && link.length) return adjustProductQty(link[0], delta);
+  // Live bundle (built on the Live screen): no catalog record, so move each item in the snapshot.
+  let items = null;
+  try { items = JSON.parse(auctionRec.fields['Bundle Items'] || 'null'); } catch (e) { items = null; }
+  if (!items || !items.length) return; // unknown UPC — nothing to adjust
+  const updates = [];
+  for (const it of items) {
+    if (!it.id) continue;
+    const c = await at.get(T.products, it.id).catch(() => null);
+    if (!c) continue;
+    updates.push({ id: c.id, fields: { 'Qty On Hand': Number(c.fields['Qty On Hand'] || 0) + delta * (it.count || 1) } });
+  }
+  if (updates.length) await at.update(T.products, updates);
 }
 
 // Next sale number in this stream (1, 2, 3…). Printed big on the pick label.
@@ -183,4 +194,4 @@ async function manualAssign(orderRowId, auctionRecId) {
   return { ok: true };
 }
 
-module.exports = { processOrder, manualAssign, isCanceled, adjustProductQty, bundleCounts };
+module.exports = { processOrder, manualAssign, isCanceled, adjustProductQty, adjustQty, bundleCounts };
