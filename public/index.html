@@ -249,6 +249,7 @@ dialog::backdrop{background:rgba(60,30,36,.35);backdrop-filter:blur(3px)}
           <button class="btn gold" id="pSave" type="button">Save product</button>
           <button class="btn" id="pLookup" type="button">Look up UPC</button>
           <button class="btn" id="pClear" type="button">Clear</button>
+          <button class="btn" id="pDelete" type="button" hidden style="color:var(--bad);border-color:#efc3c9">Delete product</button>
           <span class="mut" id="pMsg"></span>
         </div>
       </div>
@@ -882,9 +883,20 @@ $('#fillPhotos').onclick = async () => {
   filling = false; $('#fillPhotos').textContent = 'Fill missing photos';
 };
 
+let editingProduct = null; // the catalog record currently loaded in the form
 function fillForm(p) { Object.keys(pf).forEach((k) => { if (p[k] !== undefined && p[k] !== null) pf[k].value = p[k]; }); showPrev(); }
-function clearForm() { Object.values(pf).forEach((i) => i.value = ''); $('#pMsg').textContent = ''; showPrev(); pf.upc.focus(); }
+function clearForm() { Object.values(pf).forEach((i) => i.value = ''); $('#pMsg').textContent = ''; editingProduct = null; $('#pDelete').hidden = true; showPrev(); pf.upc.focus(); }
 $('#pClear').onclick = clearForm;
+$('#pDelete').onclick = async () => {
+  const p = editingProduct;
+  if (!p) return;
+  if (!confirm('Delete "' + p.name + '" (' + p.upc + ') from the catalog?\n\nPast sales stay in your reports. This can’t be undone.')) return;
+  try {
+    await api('products?id=' + encodeURIComponent(p.id), { method: 'DELETE' });
+    toast('Deleted ' + p.name, 'ok');
+    clearForm(); searchProducts();
+  } catch (e) { toast(e.message, 'bad'); }
+};
 
 async function loadUpc() {
   const upc = normUpc(pf.upc.value);
@@ -893,7 +905,8 @@ async function loadUpc() {
   $('#pMsg').textContent = 'Checking…';
   try {
     const d = await api('products?upc=' + upc);
-    if (d.product) { fillForm(d.product); $('#pMsg').textContent = 'Already in catalog — editing.'; pf.qty.focus(); return; }
+    if (d.product) { fillForm(d.product); editingProduct = d.product; $('#pDelete').hidden = false; $('#pMsg').textContent = 'Already in catalog — editing.'; pf.qty.focus(); return; }
+    editingProduct = null; $('#pDelete').hidden = true;
     const l = await api('upc-lookup?upc=' + upc);
     ['name', 'brand', 'category', 'cost', 'qty', 'image'].forEach((k) => pf[k].value = '');
     if (l.found) { fillForm(l); $('#pMsg').textContent = 'New product — details filled from UPC. Add cost and qty.'; pf.cost.focus(); }
