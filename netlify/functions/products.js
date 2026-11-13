@@ -2,6 +2,7 @@
 // GET ?q=    → search name / brand / UPC
 // GET        → first 300 products
 // POST {records:[{upc,name,brand,category,cost,qty,image}]} → upsert by UPC
+// DELETE ?id=  → removes a product (blocked while it's inside a bundle)
 const at = require('../lib/airtable');
 const shape = require('../lib/shape');
 const { json, body, wrap } = require('../lib/http');
@@ -32,7 +33,25 @@ exports.handler = wrap(async (event) => {
     return json(200, { products: rows.map(shape.product) });
   }
 
-  if (event.httpMethod !== 'POST') return json(405, { error: 'GET or POST' });
+  if (event.httpMethod === 'DELETE') {
+    const id = qs.id;
+    if (!id) return json(400, { error: 'id required' });
+    const p = await at.get(T.products, id);
+    const inBundles = p.fields['In Bundles'] || [];
+    if (inBundles.length) {
+      const names = [];
+      for (const bid of inBundles.slice(0, 5)) {
+        const b = await at.get(T.products, bid).catch(() => null);
+        if (b) names.push(b.fields.Name || b.fields.UPC);
+      }
+      return json(409, { error: `This product is inside ${inBundles.length} bundle(s): ${names.join('; ')}. Delete those bundles first.` });
+    }
+    // Past scans keep their own copy of the name and sale details, so reports are unaffected.
+    await at.del(T.products, id);
+    return json(200, { ok: true });
+  }
+
+  if (event.httpMethod !== 'POST') return json(405, { error: 'GET, POST or DELETE' });
   const input = body(event).records || [];
   if (!input.length) return json(400, { error: 'No records' });
   if (input.length > 50) return json(400, { error: 'Send 50 or fewer per request' });
