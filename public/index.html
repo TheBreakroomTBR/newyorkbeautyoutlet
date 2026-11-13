@@ -143,6 +143,9 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 .bcard .nm{flex:1;min-width:0} .bcard .nm b{display:block;font-weight:600}
 .bcard .nm span{display:block;font-size:12px;color:var(--mut);white-space:pre-line}
 .stage .contents{font-size:13px;color:var(--mut);margin-top:6px;white-space:pre-line;columns:2 220px;column-gap:20px;max-height:9.5em;overflow:hidden}
+.seg{display:inline-flex;background:var(--bg2);border-radius:99px;padding:3px;gap:2px}
+.seg button{border:0;background:none;padding:5px 14px;border-radius:99px;font-size:13px;font-weight:600;color:var(--mut);cursor:pointer}
+.seg button.on{background:#fff;color:var(--ink);box-shadow:0 1px 3px rgba(120,60,70,.15)}
 .testbar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;background:#fbf0d9;border:1px solid #efd9a6;color:#6b4d10;border-radius:14px;padding:10px 14px;margin:-6px 0 16px}
 .check{display:flex;align-items:center;gap:10px;font-weight:500}
 .check input{width:18px;height:18px;accent-color:var(--rose)}
@@ -267,12 +270,16 @@ dialog::backdrop{background:rgba(60,30,36,.35);backdrop-filter:blur(3px)}
     <div class="panel">
       <div class="row" style="justify-content:space-between;margin-bottom:10px">
         <h3 style="margin:0">Catalog</h3>
+        <div class="seg" role="tablist">
+          <button type="button" class="on" data-cat="products" role="tab">Products <span class="mut" id="catNP"></span></button>
+          <button type="button" data-cat="bundles" role="tab">Bundles <span class="mut" id="catNB"></span></button>
+        </div>
         <button class="btn small" id="fillPhotos" type="button">Fill missing photos</button>
         <input id="pSearch" type="text" placeholder="Search name, brand, or UPC" style="flex:1;max-width:320px">
       </div>
       <div id="fillStatus" class="mut" style="font-size:13px;margin:-2px 0 8px" hidden></div>
       <div class="tablewrap"><table>
-        <thead><tr><th></th><th>Name</th><th>Brand</th><th>UPC</th><th class="num">Cost</th><th class="num">Qty</th></tr></thead>
+        <thead id="catHead"></thead>
         <tbody id="catBody"></tbody>
       </table></div>
     </div>
@@ -930,17 +937,44 @@ $('#pSave').onclick = async () => {
 
 let searchTimer;
 $('#pSearch').addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(searchProducts, 300); });
+let catView = 'products';
+$$('[data-cat]').forEach((b) => b.onclick = () => {
+  catView = b.dataset.cat;
+  $$('[data-cat]').forEach((x) => x.classList.toggle('on', x === b));
+  $('#pSearch').placeholder = catView === 'bundles' ? 'Search bundles or the items in them' : 'Search name, brand, SKU, or UPC';
+  searchProducts();
+});
+
 async function searchProducts() {
   const q = $('#pSearch').value.trim();
+  const thumb = (img) => '<td><div class="thumb" style="' + (img ? 'background-image:url(&quot;' + esc(img) + '&quot;)' : '') + '"></div></td>';
   try {
+    if (catView === 'bundles') {
+      $('#catHead').innerHTML = '<tr><th></th><th>Bundle</th><th class="num">Items</th><th>Barcode</th><th class="num">Cost</th><th class="num">Can make</th></tr>';
+      const d = await api('bundles');
+      const ql = q.toLowerCase();
+      const list = d.bundles.filter((b) => !ql || (b.name + ' ' + b.upc + ' ' + b.contents).toLowerCase().includes(ql));
+      $('#catNB').textContent = d.bundles.length;
+      $('#catBody').innerHTML = list.map((b) => {
+        const lines = bundleLines(b.contents);
+        return '<tr data-upc="' + esc(b.upc) + '" style="cursor:pointer">' + thumb(b.image) +
+          '<td><b style="font-weight:600">' + esc(b.name) + '</b><div class="mut" style="font-size:12px">' + esc(lines.map((l) => l.count + '× ' + l.name).join(' · ')) + '</div></td>' +
+          '<td class="num">' + lines.reduce((n, l) => n + l.count, 0) + '</td><td class="mut">' + esc(b.upc) + '</td>' +
+          '<td class="num">' + esc(money(b.cost)) + '</td>' +
+          '<td class="num" style="color:' + (b.available <= 0 ? 'var(--bad)' : b.available <= 2 ? 'var(--warn)' : 'inherit') + '">' + esc(b.available) + '</td></tr>';
+      }).join('') || '<tr><td colspan="6" class="mut">' + (q ? 'No matching bundles.' : 'No bundles yet. Build one on the Bundles tab.') + '</td></tr>';
+      return;
+    }
+    $('#catHead').innerHTML = '<tr><th></th><th>Name</th><th>Brand</th><th>SKU</th><th>UPC</th><th class="num">Cost</th><th class="num">Qty</th></tr>';
     const d = await api('products' + (q ? '?q=' + encodeURIComponent(q) : ''));
-    $('#catBody').innerHTML = d.products.map((p) =>
-      '<tr data-upc="' + esc(p.upc) + '" style="cursor:pointer">' +
-      '<td><div class="thumb" style="' + (p.image ? 'background-image:url(&quot;' + esc(p.image) + '&quot;)' : '') + '"></div></td>' +
-      '<td>' + esc(p.name) + '</td><td>' + esc(p.brand) + '</td><td class="mut">' + esc(p.upc) + '</td>' +
-      '<td class="num">' + esc(money(p.cost)) + '</td><td class="num" style="color:' + (p.isBundle ? 'inherit' : p.qty <= 0 ? 'var(--bad)' : p.qty <= 2 ? 'var(--warn)' : 'inherit') + '">' + (p.isBundle ? 'bundle' : esc(p.qty)) + '</td></tr>'
-    ).join('') || '<tr><td colspan="6" class="mut">' + (q ? 'No matches.' : 'No products yet. Scan one or import a CSV.') + '</td></tr>';
-  } catch (e) { $('#catBody').innerHTML = '<tr><td colspan="6" class="mut">' + esc(e.message) + '</td></tr>'; }
+    const list = d.products.filter((p) => !p.isBundle);
+    if (!q) $('#catNP').textContent = list.length;
+    $('#catBody').innerHTML = list.map((p) =>
+      '<tr data-upc="' + esc(p.upc) + '" style="cursor:pointer">' + thumb(p.image) +
+      '<td>' + esc(p.name) + '</td><td>' + esc(p.brand) + '</td><td class="mut">' + esc(p.sku) + '</td><td class="mut">' + esc(p.upc) + '</td>' +
+      '<td class="num">' + esc(money(p.cost)) + '</td><td class="num" style="color:' + (p.qty <= 0 ? 'var(--bad)' : p.qty <= 2 ? 'var(--warn)' : 'inherit') + '">' + esc(p.qty) + '</td></tr>'
+    ).join('') || '<tr><td colspan="7" class="mut">' + (q ? 'No matches.' : 'No products yet. Scan one or import a CSV.') + '</td></tr>';
+  } catch (e) { $('#catBody').innerHTML = '<tr><td colspan="7" class="mut">' + esc(e.message) + '</td></tr>'; }
 }
 $('#catBody').addEventListener('click', (e) => {
   const tr = e.target.closest('tr[data-upc]');
