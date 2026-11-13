@@ -86,6 +86,7 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 .stage .label{font-size:13px;font-weight:600;color:var(--rose);display:inline-flex;align-items:center;gap:7px}
 .stage .label::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--rose)}
 .stage .name{font-family:var(--serif);font-weight:800;font-size:clamp(28px,3.2vw,42px);line-height:1.08;margin:8px 0 8px;letter-spacing:-.8px}
+.stage .name.small{font-size:clamp(22px,2.4vw,32px);display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 .stage .brandline{font-size:15px;color:var(--mut);font-weight:500}
 .stage .facts{display:flex;gap:26px;margin-top:18px;flex-wrap:wrap}
 .stage .facts div{font-size:12px;color:var(--mut)}
@@ -146,6 +147,8 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 .seg{display:inline-flex;background:var(--bg2);border-radius:99px;padding:3px;gap:2px}
 .seg button{border:0;background:none;padding:5px 14px;border-radius:99px;font-size:13px;font-weight:600;color:var(--mut);cursor:pointer}
 .seg button.on{background:#fff;color:var(--ink);box-shadow:0 1px 3px rgba(120,60,70,.15)}
+.lbpanel{border:2px solid var(--rose);margin:-4px 0 16px;background:#fff}
+.scanbar.bundling input{border-color:var(--rose);box-shadow:0 0 0 3px rgba(200,111,126,.18)}
 .testbar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;background:#fbf0d9;border:1px solid #efd9a6;color:#6b4d10;border-radius:14px;padding:10px 14px;margin:-6px 0 16px}
 .check{display:flex;align-items:center;gap:10px;font-weight:500}
 .check input{width:18px;height:18px;accent-color:var(--rose)}
@@ -177,8 +180,18 @@ dialog::backdrop{background:rgba(60,30,36,.35);backdrop-filter:blur(3px)}
 <section data-tab="live" class="on">
   <div class="scanbar">
     <input id="scanInput" type="text" inputmode="numeric" autocomplete="off" placeholder="Scan the next item">
+    <button class="btn gold" id="lbStart" type="button">Bundle</button>
     <button class="btn" id="undoBtn" type="button">Undo last scan</button>
     <button class="btn" id="newStreamBtn" type="button">Start new stream</button>
+  </div>
+  <div class="panel lbpanel" id="lbPanel" hidden>
+    <div class="row" style="justify-content:space-between">
+      <div><h3 style="margin:0">Building a bundle</h3><div class="mut" style="font-size:13px">Scan 2–10 items, then tap Done. Press Enter on an empty scan box to finish.</div></div>
+      <div class="row"><span id="lbSum" class="mut" style="font-size:14px"></span>
+        <button class="btn" id="lbCancel" type="button">Cancel</button>
+        <button class="btn gold" id="lbDone" type="button" disabled>Done · put on screen</button></div>
+    </div>
+    <div id="lbItems" style="margin-top:8px"></div>
   </div>
   <div class="testbar" id="testBar" hidden>
     <span><b>Test mode</b> · sales here are simulated and can be cleared on the Test tab.</span>
@@ -636,6 +649,7 @@ let currentProduct = null; // product details from the last scan (has qty)
 
 async function doScan(raw) {
   const upc = String(raw || '').trim();
+  if (lbMode) { if (!upc) return lbFinish(); return lbAdd(upc); }
   if (!upc) return;
   const now = Date.now();
   if (upc === lastScan.upc && now - lastScan.t < 2500) return; // scanner double-read
@@ -659,6 +673,69 @@ document.addEventListener('click', () => {
     const a = document.activeElement;
     if (!a || a === document.body) $('#scanInput').focus();
   }, 200);
+});
+
+// ---- Live bundle: several items, one auction, no label ----
+let lbMode = false;
+let lbItems = []; // {upc, name, brand, startPrice, qty, count}
+let lbLast = { code: '', t: 0 };
+function lbRender() {
+  const n = lbItems.reduce((k, i) => k + i.count, 0);
+  const start = lbItems.reduce((k, i) => k + Number(i.startPrice || 0) * i.count, 0);
+  $('#lbSum').textContent = n + (n === 1 ? ' item' : ' items') + (start ? ' · start ' + money(start) : '');
+  $('#lbDone').disabled = n < 2 || n > 10;
+  $('#lbItems').innerHTML = lbItems.map((it, i) =>
+    '<div class="bitem"><div class="nm"><b>' + esc(it.name) + '</b><span>' + esc(it.brand) + ' · start ' + esc(money(it.startPrice)) + ' · ' + esc(it.qty) + ' in stock</span></div>' +
+    '<button class="qtybtn" data-lbminus="' + i + '" type="button" aria-label="One fewer">−</button><b style="min-width:22px;text-align:center">' + it.count + '</b>' +
+    '<button class="qtybtn" data-lbplus="' + i + '" type="button" aria-label="One more">+</button></div>'
+  ).join('') || '<p class="mut" style="margin:6px 0 0">Scan the first item…</p>';
+}
+function lbSet(on) {
+  lbMode = on;
+  if (!on) lbItems = [];
+  $('#lbPanel').hidden = !on;
+  $('.scanbar').classList.toggle('bundling', on);
+  $('#lbStart').hidden = on;
+  $('#scanInput').placeholder = on ? 'Scan items for the bundle' : 'Scan the next item';
+  lbRender();
+  $('#scanInput').focus();
+}
+async function lbAdd(code) {
+  const now = Date.now();
+  if (code === lbLast.code && now - lbLast.t < 800) return; // scanner double-read
+  lbLast = { code, t: now };
+  if (lbItems.reduce((k, i) => k + i.count, 0) >= 10) return toast('A bundle holds up to 10 items', 'warn');
+  try {
+    const d = await api('products?code=' + encodeURIComponent(code));
+    if (!d.product) return toast('“' + code + '” isn’t in your catalog', 'warn');
+    if (d.product.isBundle) return toast('Scan the items, not a bundle label', 'warn');
+    const have = lbItems.find((i) => i.upc === d.product.upc);
+    if (have) have.count++;
+    else lbItems.push({ upc: d.product.upc, name: d.product.name, brand: d.product.brand, startPrice: d.product.startPrice, qty: d.product.qty, count: 1 });
+    lbRender();
+  } catch (e) { toast(e.message, 'bad'); }
+}
+async function lbFinish() {
+  const n = lbItems.reduce((k, i) => k + i.count, 0);
+  if (n < 2) return toast('Scan at least 2 items', 'warn');
+  $('#lbDone').disabled = true;
+  try {
+    const d = await api('scan', { method: 'POST', body: { items: lbItems.map((i) => ({ code: i.upc, count: i.count })), stream: session ? 's' + session : '' } });
+    currentProduct = null;
+    live.unshift(d.auction);
+    lbSet(false);
+    renderLive(true);
+  } catch (e) { toast(e.message, 'bad'); $('#lbDone').disabled = false; }
+}
+$('#lbStart').onclick = () => lbSet(true);
+$('#lbCancel').onclick = () => lbSet(false);
+$('#lbDone').onclick = lbFinish;
+$('#lbItems').addEventListener('click', (e) => {
+  const t = e.target.closest('button'); if (!t) return;
+  if (t.dataset.lbplus) { if (lbItems.reduce((k, i) => k + i.count, 0) < 10) lbItems[+t.dataset.lbplus].count++; else toast('A bundle holds up to 10 items', 'warn'); }
+  if (t.dataset.lbminus) { const it = lbItems[+t.dataset.lbminus]; it.count--; if (it.count < 1) lbItems.splice(+t.dataset.lbminus, 1); }
+  lbRender();
+  $('#scanInput').focus();
 });
 
 $('#undoBtn').onclick = async () => {
@@ -732,12 +809,12 @@ function renderLive(flash) {
     st.innerHTML =
       '<div class="img" style="' + (cur.image ? 'background-image:url(&quot;' + esc(cur.image) + '&quot;)' : '') + '">' + (cur.image ? '' : esc(initials(cur.brand || cur.name))) + '</div>' +
       '<div><div class="label">On screen now</div>' +
-      '<div class="name">' + esc(cur.name) + '</div>' +
+      '<div class="name' + (bi ? ' small' : '') + '">' + esc(cur.name) + '</div>' +
       '<div class="brandline">' + esc(bi ? 'Bundle · ' + bUnits + ' items' : (cur.brand || (cur.unknown ? 'Not in catalog yet' : ''))) + '</div>' +
       (bi ? '<div class="contents">' + esc(bi.map((l) => l.count + '× ' + l.name).join('\n')) + '</div>' : '') +
       '<div class="facts"><div><b>' + esc(tm(cur.scannedMs)) + '</b>Went up</div><div><b>' + esc(money(cur.startPrice)) + '</b>Start price</div>' +
       (qtyLeft !== null ? '<div><b>' + esc(qtyLeft) + '</b>Left in stock</div>' : '') +
-      '<div><b>' + esc(cur.upc) + '</b>UPC</div></div>' + state + '</div>';
+      (bi ? '<div><b>' + bUnits + '</b>Items</div>' : '<div><b>' + esc(cur.upc) + '</b>UPC</div>') + '</div>' + state + '</div>';
   }
 
   // Stats
