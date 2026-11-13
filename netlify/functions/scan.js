@@ -7,6 +7,51 @@ const { normUpc, streamDate, clockTime } = require('../lib/util');
 const { bundleCounts } = require('../lib/match');
 const { T } = at;
 
+// A bundle put together on the Live screen: one auction, several items, no label needed.
+async function liveBundle(event) {
+  const b = body(event);
+  const want = {}; const recs = {}; const notFound = [];
+  for (const it of b.items) {
+    const r = await at.findByCode(it.code);
+    if (!r) { notFound.push(it.code); continue; }
+    if (r.fields['Is Bundle']) return json(400, { error: 'Scan the items, not a bundle label' });
+    recs[r.id] = r;
+    want[r.id] = (want[r.id] || 0) + Math.max(1, Math.round(Number(it.count) || 1));
+  }
+  if (notFound.length) return json(400, { error: `Not in catalog: ${notFound.join(', ')}` });
+  const total = Object.values(want).reduce((a, c) => a + c, 0);
+  if (total < 2 || total > 10) return json(400, { error: 'A bundle holds 2 to 10 items' });
+
+  const items = Object.keys(want).map((id) => {
+    const f = recs[id].fields;
+    return { id, upc: f.UPC, sku: f.SKU || '', name: f.Name || '', brand: f.Brand || '', cost: f.Cost ?? null, start: f['Start Price'] ?? null, count: want[id] };
+  });
+  const short = items.map((i) => (i.count > 1 ? `${i.count}× ` : '') + (i.name || i.upc).split(/ [-–] |,/)[0].trim());
+  const name = short.length <= 3 ? `Bundle: ${short.join(' + ')}` : `Bundle of ${total}: ${short.slice(0, 2).join(' + ')} + ${short.length - 2} more`;
+  const now = Date.now();
+  const fields = {
+    'Auction Key': `${streamDate(now)} ${clockTime(now)} ${name}`.slice(0, 200),
+    UPC: 'LIVE-BUNDLE',
+    'Product Name': name.slice(0, 250),
+    Brand: 'Bundle',
+    'Scanned Ms': now,
+    'Scanned At': new Date(now).toISOString(),
+    'Stream Date': streamDate(now),
+    'Match Status': 'Open',
+    Unknown: false,
+    'Stream ID': String(b.stream || streamDate(now)).slice(0, 60),
+    Units: total,
+    'Bundle Items': JSON.stringify(items.map(({ start, ...rest }) => rest)),
+  };
+  if (items.every((i) => i.cost != null)) fields.Cost = Math.round(items.reduce((a, i) => a + i.cost * i.count, 0) * 100) / 100;
+  const startSum = items.reduce((a, i) => a + Number(i.start || 0) * i.count, 0);
+  if (startSum > 0) fields['Start Price'] = startSum;
+  const img = items.map((i) => recs[i.id].fields['Image URL']).find(Boolean);
+  if (img) fields['Image URL'] = img;
+  const [rec] = await at.create(T.auctions, [fields]);
+  return json(200, { auction: shape.auction(rec), product: null, unknown: false });
+}
+
 exports.handler = wrap(async (event) => {
   if (event.httpMethod === 'DELETE') {
     const id = event.queryStringParameters?.id;
@@ -18,6 +63,7 @@ exports.handler = wrap(async (event) => {
   }
 
   if (event.httpMethod !== 'POST') return json(405, { error: 'POST or DELETE' });
+  if (Array.isArray(body(event).items)) return liveBundle(event);
   const raw = String(body(event).upc || '').trim();
   if (!raw) return json(400, { error: 'No UPC' });
   const p = await at.findByCode(raw);
@@ -45,7 +91,7 @@ exports.handler = wrap(async (event) => {
     for (const cid of p.fields.Components) {
       const c = await at.get(T.products, cid);
       items.push({
-        upc: c.fields.UPC, sku: c.fields.SKU || '', name: c.fields.Name || '', brand: c.fields.Brand || '',
+        id: c.id, upc: c.fields.UPC, sku: c.fields.SKU || '', name: c.fields.Name || '', brand: c.fields.Brand || '',
         cost: c.fields.Cost ?? null, count: counts[c.fields.UPC] || 1,
       });
     }
