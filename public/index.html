@@ -644,6 +644,8 @@ let session = Number(localStorage.getItem('bat_session') || 0);
 if (session && Date.now() - session > 20 * 3600e3) session = 0;
 let live = [];
 let soldSeen = null;
+let soldSeenAtStart = null; // sales already there when the page opened — never auto-print those
+const pickWaiting = {};    // sale id → when we first saw it without a buyer name
 let lastScan = { upc: '', t: 0 };
 let currentProduct = null; // product details from the last scan (has qty)
 
@@ -784,11 +786,25 @@ function renderLive(flash) {
       if (!soldSeen.has(a.id)) {
         fresh.add(a.id);
         toast((a.saleNumber ? '#' + a.saleNumber + ' · ' : '') + 'Sold ' + money(a.price) + ' · ' + a.name, 'sale');
-        if (autoPrint && a.saleNumber && !printedIds.has(a.id)) queuePick(a);
       }
     });
   }
+  if (!soldSeenAtStart) soldSeenAtStart = new Set(ids);
   soldSeen = ids;
+  // Pick labels wait (up to 45s) for the buyer's TikTok name, which can land a few seconds after the sale.
+  if (autoPrint) {
+    const nowMs = Date.now();
+    sold.forEach((a) => {
+      if (!a.saleNumber || printedIds.has(a.id) || soldSeenAtStart.has(a.id)) return;
+      if (!pickWaiting[a.id]) pickWaiting[a.id] = nowMs;
+      const name = String(a.buyer || '');
+      const junk = /@scs\.tiktok|^@?\d{12,}$|\*{2,}/.test(name);
+      if ((name && !junk) || nowMs - pickWaiting[a.id] > 45000) {
+        delete pickWaiting[a.id];
+        queuePick(junk ? Object.assign({}, a, { buyer: '' }) : a);
+      }
+    });
+  }
 
   // Stage
   const cur = live[0];
