@@ -19,6 +19,7 @@ function auction(r) {
     units: f.Units || 1,
     startPrice: f['Start Price'] ?? null,
     saleNumber: f['Sale Number'] || null,
+    matchedAt: f['Matched At'] ? Date.parse(f['Matched At']) : 0,
     streamId: f['Stream ID'] || '',
     bundleItems: (() => { try { return f['Bundle Items'] ? JSON.parse(f['Bundle Items']) : null; } catch (e) { return null; } })(),
   };
@@ -55,6 +56,7 @@ function order(r) {
     match: f['Match Status'] || '',
     note: f.Note || '',
     auctionRec: f['Auction Rec'] || '',
+    auctionNo: (() => { try { const li = (JSON.parse(f.Raw || '{}').line_items || [])[0] || {}; const n = Number(li.sku_name || li.seller_sku); return Number.isInteger(n) && n > 0 ? n : null; } catch (e) { return null; } })(),
   };
 }
 

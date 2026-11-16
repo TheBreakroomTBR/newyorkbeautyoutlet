@@ -123,6 +123,8 @@ async function recentOrders(n = 5) {
 
 // Optional filter: only orders on your auction listing(s).
 function isAuctionOrder(ord) {
+  // Giveaway wins ($0 "ZERO_LOTTERY" orders) and regular shop sales are not auctions.
+  if (ord.order_type && ord.order_type !== 'AUCTION') return false;
   const ids = String(process.env.AUCTION_PRODUCT_IDS || '').split(',').map((s) => s.trim()).filter(Boolean);
   if (!ids.length) return true;
   return (ord.line_items || []).some((li) => ids.includes(String(li.product_id)));
@@ -139,6 +141,17 @@ function buyerName(ord) {
   return '';
 }
 
+// TikTok numbers each auction on the "Item on Screen" listing: 1, 2, 3… (the SKU name).
+// Using it means the pick label matches the number TikTok shows.
+function auctionNumber(ord) {
+  const li = (ord.line_items || [])[0] || {};
+  for (const v of [li.sku_name, li.seller_sku]) {
+    const n = Number(String(v || '').trim());
+    if (Number.isInteger(n) && n > 0) return n;
+  }
+  return null;
+}
+
 function mapOrder(ord) {
   const items = ord.line_items || [];
   // Winning bid = product subtotal (no shipping/tax). Falls back to summing line items.
@@ -151,6 +164,7 @@ function mapOrder(ord) {
     status: ord.status || '',
     // TikTok username first (for the customer's pick label); falls back to the recipient name.
     buyer: buyerName(ord),
+    auctionNo: auctionNumber(ord),
     source: 'tiktok-webhook',
     raw: JSON.stringify(ord),
   };
@@ -166,4 +180,4 @@ function verifyWebhook(rawBody, header) {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
-module.exports = { exchangeCode, fetchAndStoreShop, getOrder, recentOrders, mapOrder, isAuctionOrder, verifyWebhook, readSettings, APP_KEY };
+module.exports = { auctionNumber, exchangeCode, fetchAndStoreShop, getOrder, recentOrders, mapOrder, isAuctionOrder, verifyWebhook, readSettings, APP_KEY };

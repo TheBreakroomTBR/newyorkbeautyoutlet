@@ -79,11 +79,21 @@ async function nextSaleNumber(streamId) {
   return (rows[0] ? Number(rows[0].fields['Sale Number']) : 0) + 1;
 }
 
+// TikTok's own auction number for an order row (read from the saved order data).
+function auctionNoFromRow(f) {
+  try {
+    const raw = JSON.parse(f.Raw || '{}');
+    const li = (raw.line_items || [])[0] || {};
+    for (const v of [li.sku_name, li.seller_sku]) { const n = Number(String(v || '').trim()); if (Number.isInteger(n) && n > 0) return n; }
+  } catch (e) { /* no raw data */ }
+  return null;
+}
+
 async function assign(auctionRec, orderRowId, o) {
   const canceled = isCanceled(o.status);
-  const saleNumber = !canceled && !auctionRec.fields['Sale Number']
-    ? await nextSaleNumber(auctionRec.fields['Stream ID'] || auctionRec.fields['Stream Date'])
-    : null;
+  // Prefer TikTok's auction number so labels match TikTok; otherwise count up within the stream.
+  const saleNumber = canceled ? null
+    : (o.auctionNo || auctionRec.fields['Sale Number'] || await nextSaleNumber(auctionRec.fields['Stream ID'] || auctionRec.fields['Stream Date']));
   await at.update(T.auctions, [{
     id: auctionRec.id,
     fields: {
@@ -159,6 +169,7 @@ async function processOrder(o) {
       const a = await at.get(T.auctions, aRec);
       const was = a.fields['Match Status'];
       const f = { 'Order Status': o.status || '', 'Sale Price': o.price };
+      if (o.auctionNo && !a.fields['Sale Number']) f['Sale Number'] = o.auctionNo;
       if (o.buyer) f.Buyer = o.buyer; // the buyer's name often arrives on a later update
       if (canceled && was === 'Sold') {
         f['Match Status'] = 'Canceled';
@@ -190,9 +201,34 @@ async function manualAssign(orderRowId, auctionRecId) {
   if (row.fields['Auction Rec']) throw new Error('That order is already matched');
   const f = row.fields;
   await assign(a, row.id, {
-    orderId: f['Order ID'], price: f.Price, status: f['Order Status'], buyer: f.Buyer,
+    orderId: f['Order ID'], price: f.Price, status: f['Order Status'], buyer: f.Buyer, auctionNo: auctionNoFromRow(f),
   });
   return { ok: true };
 }
 
-module.exports = { processOrder, manualAssign, isCanceled, adjustProductQty, adjustQty, bundleCounts };
+// "Same item again": the host re-ran the last item in TikTok without scanning it.
+// Copies the scan that was on screen when the order came in and attaches the order to the copy.
+const COPY = ['UPC', 'Product', 'Product Name', 'Brand', 'Cost', 'Image URL', 'Start Price', 'Units', 'Bundle Items', 'Unknown', 'Stream ID', 'Stream Date'];
+async function repeatAssign(orderRowId, sourceAuctionId) {
+  const row = await at.get(T.orders, orderRowId);
+  if (row.fields['Auction Rec']) throw new Error('That order is already matched');
+  const createdMs = Number(row.fields['Created Ms']);
+  let src = sourceAuctionId ? await at.get(T.auctions, sourceAuctionId) : null;
+  if (!src) {
+    [src] = await at.list(T.auctions, { filter: `{Scanned Ms}<=${createdMs}`, sort: [{ field: 'Scanned Ms', direction: 'desc' }], max: 1 });
+  }
+  if (!src) throw new Error('No earlier item to repeat');
+  const ms = Math.max(Number(src.fields['Scanned Ms'] || 0) + 1, createdMs - 1);
+  const fields = {};
+  COPY.forEach((k) => { if (src.fields[k] !== undefined) fields[k] = src.fields[k]; });
+  Object.assign(fields, {
+    'Auction Key': `${src.fields['Auction Key'] || src.fields['Product Name'] || ''} (again)`.slice(0, 200),
+    'Scanned Ms': ms, 'Scanned At': new Date(ms).toISOString(), 'Match Status': 'Open',
+  });
+  const [copy] = await at.create(T.auctions, [fields]);
+  const f = row.fields;
+  await assign(copy, row.id, { orderId: f['Order ID'], price: f.Price, status: f['Order Status'], buyer: f.Buyer, auctionNo: auctionNoFromRow(f) });
+  return { ok: true, auction: copy.id };
+}
+
+module.exports = { processOrder, manualAssign, repeatAssign, isCanceled, adjustProductQty, adjustQty, bundleCounts };
