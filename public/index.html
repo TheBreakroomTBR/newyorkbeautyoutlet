@@ -147,6 +147,11 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 .seg{display:inline-flex;background:var(--bg2);border-radius:99px;padding:3px;gap:2px}
 .seg button{border:0;background:none;padding:5px 14px;border-radius:99px;font-size:13px;font-weight:600;color:var(--mut);cursor:pointer}
 .seg button.on{background:#fff;color:var(--ink);box-shadow:0 1px 3px rgba(120,60,70,.15)}
+.orphans{background:#fff4e5;border:2px solid #f0b45c;border-radius:16px;padding:12px 16px;margin:-4px 0 16px}
+.orphans h3{margin:0 0 6px;font-size:16px;color:#8a5a00}
+.orph{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:8px 0;border-top:1px solid #f6dcb5}
+.orph:first-of-type{border-top:0}
+.orph .who{flex:1;min-width:180px}
 .lbpanel{border:2px solid var(--rose);margin:-4px 0 16px;background:#fff}
 .scanbar.bundling input{border-color:var(--rose);box-shadow:0 0 0 3px rgba(200,111,126,.18)}
 .testbar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;background:#fbf0d9;border:1px solid #efd9a6;color:#6b4d10;border-radius:14px;padding:10px 14px;margin:-6px 0 16px}
@@ -184,6 +189,7 @@ dialog::backdrop{background:rgba(60,30,36,.35);backdrop-filter:blur(3px)}
     <button class="btn" id="undoBtn" type="button">Undo last scan</button>
     <button class="btn" id="newStreamBtn" type="button">Start new stream</button>
   </div>
+  <div class="orphans" id="orphans" hidden></div>
   <div class="panel lbpanel" id="lbPanel" hidden>
     <div class="row" style="justify-content:space-between">
       <div><h3 style="margin:0">Building a bundle</h3><div class="mut" style="font-size:13px">Scan 2–10 items, then tap Done. Press Enter on an empty scan box to finish.</div></div>
@@ -594,24 +600,34 @@ function labelHtml(doc, extraCss, autoPrint) {
 // ---------- PICK LABELS ----------
 // One label per sale: big sale number + item + buyer + order. Stick it on the item, bag it, done.
 let autoPrint = localStorage.getItem('bat_autoprint') === '1';
+// Every sale matched after this moment gets a label — even if the page was reloaded or on another tab.
+let autoPrintSince = Number(localStorage.getItem('bat_autoprint_since')) || (autoPrint ? Date.now() : 0);
 const printedIds = new Set(JSON.parse(localStorage.getItem('bat_printed') || '[]'));
 function rememberPrinted(id) {
   printedIds.add(id);
   localStorage.setItem('bat_printed', JSON.stringify([...printedIds].slice(-500)));
 }
-// Customer-facing pick label: sale number, product name, TikTok username. Nothing else.
+// Customer-facing pick label: TikTok username (big), auction number, product name. Nothing else.
 function pickHtml(a, size) {
   const small = size !== '4x6';
   const dims = small ? ['2.25in', '1.25in'] : ['4in', '6in'];
+  const user = String(a.buyer || '').trim();
+  // Shrink long usernames so they always fit on one line.
+  // Emoji and symbols print about twice as wide as letters, so count them double.
+  const len = Math.max(1, [...user].reduce((n, ch) => n + (/[\x20-\x7E]/.test(ch) ? 1 : 1.9), 0));
+  // Long names (over ~18 characters) wrap onto two lines instead of getting cut off.
+  const lines = len > 18 ? 2 : 1;
+  const userPt = small ? Math.max(10, Math.min(26, Math.floor(235 * lines / len))) : Math.max(24, Math.min(72, Math.floor(430 * lines / len)));
   const inner =
+    (user ? '<div class="u">' + esc(user) + '</div>' : '<div class="u none">—</div>') +
     '<div class="n">#' + esc(a.saleNumber) + '</div>' +
-    '<div class="nm clamp2">' + esc(a.name) + '</div>' +
-    (a.buyer ? '<div class="u">' + esc(a.buyer) + '</div>' : '');
+    '<div class="nm clamp2">' + esc(a.name) + '</div>';
   const doc = labelDoc('#' + a.saleNumber, dims, small, inner, 1);
   const css =
-    '.n{font-weight:900;font-size:' + (small ? '26pt' : '90pt') + ';line-height:1;letter-spacing:-0.5px}' +
-    '.nm{font-weight:700;font-size:' + (small ? '8pt' : '20pt') + ';line-height:1.15}' +
-    '.u{font-size:' + (small ? '8pt' : '18pt') + ';line-height:1.2}';
+    '.u{font-weight:900;font-size:' + userPt + 'pt;line-height:1.05;max-width:100%;overflow:hidden;' + (lines > 1 ? 'word-break:break-all;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical' : 'white-space:nowrap') + '}' +
+    '.u.none{color:#999}' +
+    '.n{font-weight:700;font-size:' + (small ? '12pt' : '30pt') + ';line-height:1}' +
+    '.nm{font-weight:400;font-size:' + (small ? '7pt' : '16pt') + ';line-height:1.15}';
   return labelHtml(doc, css, false);
 }
 const pickQueue = [];
@@ -740,6 +756,25 @@ $('#lbItems').addEventListener('click', (e) => {
   $('#scanInput').focus();
 });
 
+// Rerun: same item or bundle back on screen, no scan needed.
+let rerunBusy = false;
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-rerun]');
+  if (!b || rerunBusy) return;
+  const src = live.find((x) => x.id === b.dataset.rerun);
+  if (lbMode) return toast('Finish or cancel the bundle first', 'warn');
+  if (src && src.status === 'Open' && src === live[0]) return toast('That item is already on screen', 'warn');
+  rerunBusy = true;
+  try {
+    const d = await api('scan', { method: 'POST', body: { rerun: b.dataset.rerun, stream: session ? 's' + session : '' } });
+    currentProduct = d.product;
+    live.unshift(d.auction);
+    renderLive(true);
+  } catch (err) { toast(err.message, 'bad'); }
+  rerunBusy = false;
+  $('#scanInput').focus();
+});
+
 $('#undoBtn').onclick = async () => {
   const last = live[0];
   if (!last) return toast('Nothing to undo');
@@ -762,6 +797,37 @@ $('#newStreamBtn').onclick = () => {
 };
 
 let liveBusy = false;
+// Orders that came in without a matching scan (item re-run without scanning, or scanned late).
+let orphans = [];
+function renderOrphans() {
+  const box = $('#orphans');
+  box.hidden = !orphans.length;
+  if (!orphans.length) return;
+  box.innerHTML = '<h3>' + orphans.length + (orphans.length === 1 ? ' sale needs' : ' sales need') + ' an item</h3>' +
+    orphans.map((o) => {
+      // The scan on screen when the order came in, and any open scan right after it.
+      const before = live.filter((a) => a.scannedMs <= o.createdMs).sort((x, y) => y.scannedMs - x.scannedMs)[0];
+      const after = live.filter((a) => a.scannedMs > o.createdMs && a.status === 'Open' && a.scannedMs - o.createdMs < 120000).sort((x, y) => x.scannedMs - y.scannedMs)[0];
+      return '<div class="orph"><div class="who"><b>' + (o.auctionNo ? '#' + esc(o.auctionNo) + ' · ' : '') + esc(o.buyer || 'buyer') + '</b> · ' + esc(money(o.price)) + ' · ' + esc(tm(o.createdMs)) + '</div>' +
+        (before ? '<button class="btn small gold" data-orph-repeat="' + esc(o.id) + '" data-src="' + esc(before.id) + '" type="button">Same as ' + esc(before.name.slice(0, 32)) + '</button>' : '') +
+        (after ? '<button class="btn small" data-orph-assign="' + esc(o.id) + '" data-scan="' + esc(after.id) + '" type="button">Scanned late: ' + esc(after.name.slice(0, 32)) + '</button>' : '') +
+        '<button class="btn small" data-go-review type="button">More…</button></div>';
+    }).join('');
+}
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-orph-repeat],[data-orph-assign],[data-go-review]');
+  if (!b) return;
+  if (b.hasAttribute('data-go-review')) return go('review');
+  b.disabled = true;
+  try {
+    if (b.dataset.orphRepeat) await api('review', { method: 'POST', body: { action: 'repeat', orderRec: b.dataset.orphRepeat, auctionRec: b.dataset.src } });
+    else await api('review', { method: 'POST', body: { action: 'assign', orderRec: b.dataset.orphAssign, auctionRec: b.dataset.scan } });
+    toast('Sale matched', 'ok');
+    loadLive();
+    if (tab === 'review') loadReview();
+  } catch (err) { toast(err.message, 'bad'); b.disabled = false; }
+});
+
 async function loadLive() {
   if (liveBusy) return;
   liveBusy = true;
@@ -769,7 +835,9 @@ async function loadLive() {
     const since = session || (Date.now() - 14 * 3600e3);
     const d = await api('live?since=' + since);
     live = d.auctions;
+    orphans = d.orphans || [];
     renderLive();
+    renderOrphans();
     $('#liveSync').textContent = 'Updated ' + tm(Date.now());
   } catch (e) {
     $('#liveSync').textContent = e.message;
@@ -795,7 +863,7 @@ function renderLive(flash) {
   if (autoPrint) {
     const nowMs = Date.now();
     sold.forEach((a) => {
-      if (!a.saleNumber || printedIds.has(a.id) || soldSeenAtStart.has(a.id)) return;
+      if (!a.saleNumber || printedIds.has(a.id) || !(a.matchedAt >= autoPrintSince)) return;
       if (!pickWaiting[a.id]) pickWaiting[a.id] = nowMs;
       const name = String(a.buyer || '');
       const junk = /@scs\.tiktok|^@?\d{12,}$|\*{2,}/.test(name);
@@ -830,7 +898,8 @@ function renderLive(flash) {
       (bi ? '<div class="contents">' + esc(bi.map((l) => l.count + '× ' + l.name).join('\n')) + '</div>' : '') +
       '<div class="facts"><div><b>' + esc(tm(cur.scannedMs)) + '</b>Went up</div><div><b>' + esc(money(cur.startPrice)) + '</b>Start price</div>' +
       (qtyLeft !== null ? '<div><b>' + esc(qtyLeft) + '</b>Left in stock</div>' : '') +
-      (bi ? '<div><b>' + bUnits + '</b>Items</div>' : '<div><b>' + esc(cur.upc) + '</b>UPC</div>') + '</div>' + state + '</div>';
+      (bi ? '<div><b>' + bUnits + '</b>Items</div>' : '<div><b>' + esc(cur.upc) + '</b>UPC</div>') + '</div>' + state +
+      '<div style="margin-top:12px"><button class="btn" data-rerun="' + esc(cur.id) + '" type="button">↻ Run again</button></div></div>';
   }
 
   // Stats
@@ -858,19 +927,20 @@ function renderLive(flash) {
       '<td><span class="pill ' + cls + '">' + esc(label) + '</span></td>' +
       '<td class="num mut">' + esc(money(a.startPrice)) + '</td>' +
       '<td class="num" style="font-weight:600">' + (a.status === 'Sold' || a.status === 'Canceled' ? esc(money(a.price)) : '') + '</td>' +
-      '<td>' + (a.saleNumber ? '<button class="btn small" data-pick="' + esc(a.id) + '" type="button">Print</button>' : '') + '</td></tr>';
+      '<td style="white-space:nowrap">' + (a.saleNumber ? '<button class="btn small" data-pick="' + esc(a.id) + '" type="button">Print</button> ' : '') +
+      '<button class="btn small" data-rerun="' + esc(a.id) + '" type="button" title="Put this item on screen again">↻ Again</button></td></tr>';
   }).join('') || '<tr><td colspan="9" class="mut">No scans yet this stream.</td></tr>';
 }
 
-setInterval(() => { if (tab === 'live' && !document.hidden) loadLive(); }, 4000);
+setInterval(() => { if (autoPrint || (tab === 'live' && !document.hidden)) loadLive(); }, 4000);
 
 $('#autoPrint').checked = autoPrint;
 $('#pickSize').value = localStorage.getItem('bat_picksize') || '2.25x1.25';
 $('#autoPrint').onchange = (e) => {
   autoPrint = e.target.checked;
   localStorage.setItem('bat_autoprint', autoPrint ? '1' : '0');
-  // Don't print sales that already happened when you switch it on.
-  if (autoPrint) live.filter((a) => a.status === 'Sold').forEach((a) => rememberPrinted(a.id));
+  // Only sales from now on print; earlier ones can be printed with the Print button.
+  if (autoPrint) { autoPrintSince = Date.now(); localStorage.setItem('bat_autoprint_since', String(autoPrintSince)); }
 };
 $('#pickSize').onchange = (e) => localStorage.setItem('bat_picksize', e.target.value);
 $('#feedBody').addEventListener('click', (e) => {
@@ -903,6 +973,7 @@ function renderReview() {
     '<td><span class="pill ' + esc(o.match) + '">' + esc(o.match) + '</span><div class="mut" style="font-size:12px;max-width:220px">' + esc(o.note) + '</div></td>' +
     '<td><select data-sel="' + esc(o.id) + '"><option value="">Pick a scan…</option>' + opts + '</select></td>' +
     '<td class="row"><button class="btn small gold" data-assign="' + esc(o.id) + '" type="button">Assign</button>' +
+    '<button class="btn small" data-orph-repeat="' + esc(o.id) + '" data-src="" type="button" title="The item before this order was run again">Same item again</button>' +
     '<button class="btn small" data-ignore="' + esc(o.id) + '" type="button">Ignore</button></td></tr>'
   ).join('') || '<tr><td colspan="5" class="mut">Every order is matched.</td></tr>';
 }
