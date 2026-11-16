@@ -89,7 +89,7 @@ async function assign(auctionRec, orderRowId, o) {
     fields: {
       'Order ID': o.orderId,
       'Sale Price': o.price,
-      Buyer: o.buyer || '',
+      ...(o.buyer ? { Buyer: o.buyer } : {}),
       'Order Status': o.status || '',
       'Matched At': new Date().toISOString(),
       'Match Status': canceled ? 'Canceled' : 'Sold',
@@ -159,6 +159,7 @@ async function processOrder(o) {
       const a = await at.get(T.auctions, aRec);
       const was = a.fields['Match Status'];
       const f = { 'Order Status': o.status || '', 'Sale Price': o.price };
+      if (o.buyer) f.Buyer = o.buyer; // the buyer's name often arrives on a later update
       if (canceled && was === 'Sold') {
         f['Match Status'] = 'Canceled';
         await adjustQty(a, +1);

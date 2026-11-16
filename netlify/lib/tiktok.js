@@ -128,11 +128,15 @@ function isAuctionOrder(ord) {
   return (ord.line_items || []).some((li) => ids.includes(String(li.product_id)));
 }
 
+// The buyer's TikTok name as it shows in live chat (buyer_nickname).
+// TikTok often leaves it out of the very first order notice, so this can be '' for a few seconds;
+// the next status update fills it in. Never fall back to the masked email or numeric user id.
 function buyerName(ord) {
-  const u = ord.buyer_nickname || ord.buyer_username || ord.buyer_user_name || ord.user_nickname || ord.nickname
-    || ord.buyer_info?.nickname || ord.buyer_info?.username || ord.buyer?.nickname || ord.buyer?.username;
-  if (u) return String(u).startsWith('@') ? String(u) : '@' + u;
-  return ord.recipient_address?.name || ord.buyer_email || ord.user_id || '';
+  const nick = String(ord.buyer_nickname || '').trim();
+  if (nick) return nick;
+  const rn = String(ord.recipient_address?.name || '').trim();
+  if (rn && !/\*{2,}/.test(rn)) return rn; // only if TikTok didn't mask it
+  return '';
 }
 
 function mapOrder(ord) {
