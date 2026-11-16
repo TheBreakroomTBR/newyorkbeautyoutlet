@@ -4,7 +4,7 @@
 //      {action:'ignore', orderRec}
 const at = require('../lib/airtable');
 const shape = require('../lib/shape');
-const { manualAssign } = require('../lib/match');
+const { manualAssign, repeatAssign } = require('../lib/match');
 const { json, body, wrap } = require('../lib/http');
 const { T } = at;
 
@@ -28,6 +28,7 @@ exports.handler = wrap(async (event) => {
 
   if (event.httpMethod !== 'POST') return json(405, { error: 'GET or POST' });
   const b = body(event);
+  if (b.action === 'repeat') return json(200, await repeatAssign(b.orderRec, b.auctionRec));
   if (b.action === 'assign') return json(200, await manualAssign(b.orderRec, b.auctionRec));
   if (b.action === 'nosale') {
     const ids = (b.ids || []).filter(Boolean);

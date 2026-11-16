@@ -52,6 +52,33 @@ async function liveBundle(event) {
   return json(200, { auction: shape.auction(rec), product: null, unknown: false });
 }
 
+// Put the same item (or bundle) on screen again without scanning it.
+const COPY = ['UPC', 'Product', 'Product Name', 'Brand', 'Cost', 'Image URL', 'Start Price', 'Units', 'Bundle Items', 'Unknown'];
+async function rerun(event) {
+  const b = body(event);
+  const src = await at.get(T.auctions, String(b.rerun));
+  const now = Date.now();
+  const fields = {};
+  COPY.forEach((k) => { if (src.fields[k] !== undefined) fields[k] = src.fields[k]; });
+  Object.assign(fields, {
+    'Auction Key': `${streamDate(now)} ${clockTime(now)} ${src.fields['Product Name'] || ''}`.slice(0, 200),
+    'Scanned Ms': now,
+    'Scanned At': new Date(now).toISOString(),
+    'Stream Date': streamDate(now),
+    'Match Status': 'Open',
+    'Stream ID': String(b.stream || src.fields['Stream ID'] || streamDate(now)).slice(0, 60),
+  });
+  // Refresh the start price from the catalog in case it changed.
+  const link = src.fields.Product;
+  let p = null;
+  if (link && link.length) {
+    p = await at.get(T.products, link[0]).catch(() => null);
+    if (p && p.fields['Start Price'] != null) fields['Start Price'] = p.fields['Start Price'];
+  }
+  const [rec] = await at.create(T.auctions, [fields]);
+  return json(200, { auction: shape.auction(rec), product: p ? shape.product(p) : null, unknown: !!src.fields.Unknown });
+}
+
 exports.handler = wrap(async (event) => {
   if (event.httpMethod === 'DELETE') {
     const id = event.queryStringParameters?.id;
@@ -64,6 +91,7 @@ exports.handler = wrap(async (event) => {
 
   if (event.httpMethod !== 'POST') return json(405, { error: 'POST or DELETE' });
   if (Array.isArray(body(event).items)) return liveBundle(event);
+  if (body(event).rerun) return rerun(event);
   const raw = String(body(event).upc || '').trim();
   if (!raw) return json(400, { error: 'No UPC' });
   const p = await at.findByCode(raw);
