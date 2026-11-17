@@ -343,6 +343,7 @@ dialog::backdrop{background:rgba(60,30,36,.35);backdrop-filter:blur(3px)}
       <button class="btn small" data-range="30" type="button">30 days</button>
       <input id="rFrom" type="date"><span class="mut">to</span><input id="rTo" type="date">
       <button class="btn gold" id="rRun" type="button">Run</button>
+      <button class="btn" id="rXlsx" type="button" disabled>Download Excel</button>
     </div>
   </div>
   <div id="rOut"><p class="mut">Pick a range.</p></div>
@@ -558,7 +559,7 @@ function refreshTab() {
 
 // ---------- SILENT PRINTING (QZ Tray) ----------
 const QZ_SRC = 'https://cdn.jsdelivr.net/npm/qz-tray@2.3.0/qz-tray.js';
-const loadScript = (src) => new Promise((res, rej) => { const el = document.createElement('script'); el.src = src; el.onload = res; el.onerror = () => rej(new Error('Couldn’t load the QZ Tray library')); document.head.appendChild(el); });
+const loadScript = (src) => new Promise((res, rej) => { const el = document.createElement('script'); el.src = src; el.onload = res; el.onerror = () => rej(new Error('Couldn’t load ' + src.split('/').pop() + ' — check the internet connection')); document.head.appendChild(el); });
 async function qzConnect() {
   if (!window.qz) await loadScript(QZ_SRC);
   if (!qzSecured) {
@@ -1313,6 +1314,120 @@ function setRange(r) {
 $$('[data-range]').forEach((b) => b.onclick = () => { setRange(b.dataset.range); runReport(); });
 $('#rRun').onclick = runReport;
 
+// ---------- Excel export ----------
+let lastReport = null;
+const XLSX_SRC = 'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js';
+$('#rXlsx').onclick = async () => {
+  if (!lastReport) return toast('Run a report first', 'warn');
+  const btn = $('#rXlsx');
+  btn.disabled = true; btn.textContent = 'Building…';
+  try {
+    if (!window.XLSX) await loadScript(XLSX_SRC);
+    const wb = buildWorkbook(lastReport.rows);
+    const name = 'Beauty Outlet report ' + lastReport.from + (lastReport.to !== lastReport.from ? ' to ' + lastReport.to : '') + '.xlsx';
+    XLSX.writeFile(wb, name);
+  } catch (e) { toast('Couldn’t build the Excel file: ' + (e.message || e), 'bad'); }
+  btn.disabled = false; btn.textContent = 'Download Excel';
+};
+
+function buildWorkbook(rows) {
+  const r2 = (n) => (n === null || n === undefined || n === '' || !isFinite(n)) ? '' : Math.round(Number(n) * 100) / 100;
+  const when = (ms) => ms ? new Date(ms) : '';
+  const sold = rows.filter((a) => a.status === 'Sold');
+
+  // One row per physical item (bundles split evenly), same as the on-screen report.
+  const items = [];
+  sold.forEach((a) => {
+    if (a.bundleItems && a.bundleItems.length) {
+      const n = a.bundleItems.reduce((k, i) => k + i.count, 0) || 1;
+      a.bundleItems.forEach((i) => items.push({ name: i.name, brand: i.brand, units: i.count, rev: Number(a.price) * i.count / n, cost: i.cost == null ? null : i.cost * i.count, day: a.streamDate, from: 'Bundle ' + (a.saleNumber ? '#' + a.saleNumber : '') }));
+    } else items.push({ name: a.name, brand: a.brand, units: a.units || 1, rev: Number(a.price), cost: a.cost, day: a.streamDate, from: a.saleNumber ? '#' + a.saleNumber : '' });
+  });
+  const group = (keyFn) => {
+    const g = {};
+    items.forEach((i) => {
+      const k = keyFn(i);
+      const o = g[k] || (g[k] = { n: 0, rev: 0, cost: 0, costKnown: true, brand: i.brand });
+      o.n += i.units; o.rev += i.rev;
+      if (i.cost == null) o.costKnown = false; else o.cost += i.cost;
+    });
+    return g;
+  };
+
+  // Summary
+  const gross = sold.reduce((s, a) => s + Number(a.price || 0), 0);
+  const units = items.reduce((k, i) => k + i.units, 0);
+  const costed = items.filter((i) => i.cost != null);
+  const cost = costed.reduce((s, i) => s + i.cost, 0);
+  const profit = costed.reduce((s, i) => s + i.rev - i.cost, 0);
+  const count = (s) => rows.filter((a) => a.status === s).length;
+  const summary = [
+    ['The Beauty Outlet — sales report'],
+    ['From', lastReport.from, 'To', lastReport.to],
+    [],
+    ['Gross sales', r2(gross)],
+    ['Items sold', units],
+    ['Auctions won', sold.length],
+    ['Average per item', units ? r2(gross / units) : ''],
+    ['Average per auction', sold.length ? r2(gross / sold.length) : ''],
+    ['Cost of items sold', r2(cost)],
+    ['Profit over cost', r2(profit)],
+    ['Return on cost', cost ? Math.round(profit / cost * 1000) / 10 + '%' : ''],
+    ['Canceled', count('Canceled')],
+    ['No sale', count('No Sale')],
+    ['Still waiting', count('Open')],
+  ];
+
+  // Every auction
+  const sales = [['Date', 'Time', 'Auction #', 'Item', 'Brand', 'Items in it', 'Start price', 'Sale price', 'Cost', 'Profit', 'Buyer', 'Status', 'Order ID', 'UPC', 'Bundle contents']];
+  rows.slice().sort((a, b) => a.scannedMs - b.scannedMs).forEach((a) => {
+    const price = a.status === 'Sold' || a.status === 'Canceled' ? r2(a.price) : '';
+    sales.push([
+      a.streamDate || '', a.scannedMs ? new Date(a.scannedMs).toLocaleTimeString() : '', a.saleNumber || '',
+      a.name, a.brand, a.units || 1, r2(a.startPrice), price, r2(a.cost),
+      a.status === 'Sold' && a.cost != null ? r2(a.price - a.cost) : '',
+      a.buyer || '', a.status === 'Open' ? 'Waiting' : a.status, a.orderId || '', a.upc === 'LIVE-BUNDLE' ? '' : (a.upc || ''),
+      a.bundleItems ? a.bundleItems.map((i) => i.count + '× ' + i.name).join('; ') : '',
+    ]);
+  });
+
+  const table = (head, g, sortFn) => [head].concat(Object.entries(g).sort(sortFn).map(([k, v]) =>
+    head[1] === 'Brand'
+      ? [k, v.brand || '', v.n, r2(v.rev), r2(v.rev / v.n), v.costKnown ? r2(v.cost) : '', v.costKnown ? r2(v.rev - v.cost) : '']
+      : [k, v.n, r2(v.rev), r2(v.rev / v.n), v.costKnown ? r2(v.cost) : '', v.costKnown ? r2(v.rev - v.cost) : '']));
+  const byProduct = table(['Product', 'Brand', 'Items sold', 'Revenue', 'Avg each', 'Cost', 'Profit'], group((i) => i.name || '(unnamed)'), (a, b) => b[1].n - a[1].n);
+  const byBrand = table(['Brand', 'Items sold', 'Revenue', 'Avg each', 'Cost', 'Profit'], group((i) => i.brand || '(no brand)'), (a, b) => b[1].rev - a[1].rev);
+  const byDay = table(['Day', 'Items sold', 'Revenue', 'Avg each', 'Cost', 'Profit'], group((i) => i.day || '—'), (a, b) => a[0].localeCompare(b[0]));
+  const below = [['Auction', 'Date', 'Item', 'Sale price', 'Cost', 'Loss']].concat(
+    items.filter((i) => i.cost != null && i.rev < i.cost).sort((a, b) => (a.rev - a.cost) - (b.rev - b.cost))
+      .map((i) => [i.from, i.day || '', (i.units > 1 ? i.units + '× ' : '') + i.name, r2(i.rev), r2(i.cost), r2(i.rev - i.cost)]));
+
+  const wb = XLSX.utils.book_new();
+  const add = (name, aoa, widths, moneyCols) => {
+    const ws = XLSX.utils.aoa_to_sheet(aoa);
+    ws['!cols'] = widths.map((w) => ({ wch: w }));
+    if (aoa.length > 1) ws['!autofilter'] = { ref: XLSX.utils.encode_range({ s: { r: 0, c: 0 }, e: { r: aoa.length - 1, c: aoa[0].length - 1 } }) };
+    (moneyCols || []).forEach((c) => {
+      for (let r = 1; r < aoa.length; r++) {
+        const cell = ws[XLSX.utils.encode_cell({ r, c })];
+        if (cell && cell.t === 'n') cell.z = '$#,##0.00';
+      }
+    });
+    XLSX.utils.book_append_sheet(wb, ws, name);
+    return ws;
+  };
+  const sw = XLSX.utils.aoa_to_sheet(summary);
+  sw['!cols'] = [{ wch: 22 }, { wch: 14 }, { wch: 6 }, { wch: 14 }];
+  [3, 7, 8, 9, 10].forEach((r) => { const c = sw[XLSX.utils.encode_cell({ r, c: 1 })]; if (c && c.t === 'n') c.z = '$#,##0.00'; });
+  XLSX.utils.book_append_sheet(wb, sw, 'Summary');
+  add('All auctions', sales, [11, 11, 9, 46, 18, 9, 10, 10, 9, 9, 22, 10, 20, 14, 60], [6, 7, 8, 9]);
+  add('By product', byProduct, [50, 20, 10, 11, 10, 10, 10], [3, 4, 5, 6]);
+  add('By brand', byBrand, [24, 10, 11, 10, 10, 10], [2, 3, 4, 5]);
+  add('By day', byDay, [12, 10, 11, 10, 10, 10], [2, 3, 4, 5]);
+  add('Sold below cost', below, [12, 11, 50, 10, 10, 10], [3, 4, 5]);
+  return wb;
+}
+
 async function runReport() {
   const [fy, fm, fd] = $('#rFrom').value.split('-').map(Number);
   const [ty, tmo, td] = $('#rTo').value.split('-').map(Number);
@@ -1322,6 +1437,8 @@ async function runReport() {
   $('#rOut').innerHTML = '<p class="mut">Loading…</p>';
   try {
     const { auctions } = await api('report?fromMs=' + fromMs + '&toMs=' + toMs);
+    lastReport = { rows: auctions, from: $('#rFrom').value, to: $('#rTo').value };
+    $('#rXlsx').disabled = false;
     renderReport(auctions);
   } catch (e) { $('#rOut').innerHTML = '<p class="mut">' + esc(e.message) + '</p>'; }
 }
