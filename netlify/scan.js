@@ -1,0 +1,139 @@
+// POST {upc}  → logs the item that just went on screen
+// DELETE ?id= → undo a mis-scan (only if no order is attached yet)
+const at = require('../lib/airtable');
+const shape = require('../lib/shape');
+const { json, body, wrap } = require('../lib/http');
+const { normUpc, streamDate, clockTime } = require('../lib/util');
+const { bundleCounts } = require('../lib/match');
+const { T } = at;
+
+// A bundle put together on the Live screen: one auction, several items, no label needed.
+async function liveBundle(event) {
+  const b = body(event);
+  const want = {}; const recs = {}; const notFound = [];
+  for (const it of b.items) {
+    const r = await at.findByCode(it.code);
+    if (!r) { notFound.push(it.code); continue; }
+    if (r.fields['Is Bundle']) return json(400, { error: 'Scan the items, not a bundle label' });
+    recs[r.id] = r;
+    want[r.id] = (want[r.id] || 0) + Math.max(1, Math.round(Number(it.count) || 1));
+  }
+  if (notFound.length) return json(400, { error: `Not in catalog: ${notFound.join(', ')}` });
+  const total = Object.values(want).reduce((a, c) => a + c, 0);
+  if (total < 2 || total > 10) return json(400, { error: 'A bundle holds 2 to 10 items' });
+
+  const items = Object.keys(want).map((id) => {
+    const f = recs[id].fields;
+    return { id, upc: f.UPC, sku: f.SKU || '', name: f.Name || '', brand: f.Brand || '', cost: f.Cost ?? null, start: f['Start Price'] ?? null, count: want[id] };
+  });
+  const short = items.map((i) => (i.count > 1 ? `${i.count}× ` : '') + (i.name || i.upc).split(/ [-–] |,/)[0].trim());
+  const name = short.length <= 3 ? `Bundle: ${short.join(' + ')}` : `Bundle of ${total}: ${short.slice(0, 2).join(' + ')} + ${short.length - 2} more`;
+  const now = Date.now();
+  const fields = {
+    'Auction Key': `${streamDate(now)} ${clockTime(now)} ${name}`.slice(0, 200),
+    UPC: 'LIVE-BUNDLE',
+    'Product Name': name.slice(0, 250),
+    Brand: 'Bundle',
+    'Scanned Ms': now,
+    'Scanned At': new Date(now).toISOString(),
+    'Stream Date': streamDate(now),
+    'Match Status': 'Open',
+    Unknown: false,
+    'Stream ID': String(b.stream || streamDate(now)).slice(0, 60),
+    Units: total,
+    'Bundle Items': JSON.stringify(items.map(({ start, ...rest }) => rest)),
+  };
+  if (items.every((i) => i.cost != null)) fields.Cost = Math.round(items.reduce((a, i) => a + i.cost * i.count, 0) * 100) / 100;
+  const startSum = items.reduce((a, i) => a + Number(i.start || 0) * i.count, 0);
+  if (startSum > 0) fields['Start Price'] = startSum;
+  const img = items.map((i) => recs[i.id].fields['Image URL']).find(Boolean);
+  if (img) fields['Image URL'] = img;
+  const [rec] = await at.create(T.auctions, [fields]);
+  return json(200, { auction: shape.auction(rec), product: null, unknown: false });
+}
+
+// Put the same item (or bundle) on screen again without scanning it.
+const COPY = ['UPC', 'Product', 'Product Name', 'Brand', 'Cost', 'Image URL', 'Start Price', 'Units', 'Bundle Items', 'Unknown'];
+async function rerun(event) {
+  const b = body(event);
+  const src = await at.get(T.auctions, String(b.rerun));
+  const now = Date.now();
+  const fields = {};
+  COPY.forEach((k) => { if (src.fields[k] !== undefined) fields[k] = src.fields[k]; });
+  Object.assign(fields, {
+    'Auction Key': `${streamDate(now)} ${clockTime(now)} ${src.fields['Product Name'] || ''}`.slice(0, 200),
+    'Scanned Ms': now,
+    'Scanned At': new Date(now).toISOString(),
+    'Stream Date': streamDate(now),
+    'Match Status': 'Open',
+    'Stream ID': String(b.stream || src.fields['Stream ID'] || streamDate(now)).slice(0, 60),
+  });
+  // Refresh the start price from the catalog in case it changed.
+  const link = src.fields.Product;
+  let p = null;
+  if (link && link.length) {
+    p = await at.get(T.products, link[0]).catch(() => null);
+    if (p && p.fields['Start Price'] != null) fields['Start Price'] = p.fields['Start Price'];
+  }
+  const [rec] = await at.create(T.auctions, [fields]);
+  return json(200, { auction: shape.auction(rec), product: p ? shape.product(p) : null, unknown: !!src.fields.Unknown });
+}
+
+exports.handler = wrap(async (event) => {
+  if (event.httpMethod === 'DELETE') {
+    const id = event.queryStringParameters?.id;
+    if (!id) return json(400, { error: 'id required' });
+    const a = await at.get(T.auctions, id);
+    if (a.fields['Order ID']) return json(409, { error: 'This scan already has a sale attached — fix it on the Review tab' });
+    await at.del(T.auctions, id);
+    return json(200, { ok: true });
+  }
+
+  if (event.httpMethod !== 'POST') return json(405, { error: 'POST or DELETE' });
+  if (Array.isArray(body(event).items)) return liveBundle(event);
+  if (body(event).rerun) return rerun(event);
+  const raw = String(body(event).upc || '').trim();
+  if (!raw) return json(400, { error: 'No UPC' });
+  const p = await at.findByCode(raw);
+  const upc = p ? p.fields.UPC : normUpc(raw);
+  const now = Date.now();
+  const name = p ? p.fields.Name || upc : `Unknown UPC ${upc}`;
+
+  const fields = {
+    'Auction Key': `${streamDate(now)} ${clockTime(now)} ${name}`.slice(0, 200),
+    UPC: upc,
+    'Product Name': name,
+    Brand: p?.fields.Brand || '',
+    'Scanned Ms': now,
+    'Scanned At': new Date(now).toISOString(),
+    'Stream Date': streamDate(now),
+    'Match Status': 'Open',
+    Unknown: !p,
+    'Stream ID': String(body(event).stream || streamDate(now)).slice(0, 60),
+  };
+  fields.Units = 1;
+  if (p && (p.fields.Components || []).length) {
+    // Snapshot what's inside so the sale can be split per item later.
+    const counts = bundleCounts(p.fields['Bundle Contents']);
+    const items = [];
+    for (const cid of p.fields.Components) {
+      const c = await at.get(T.products, cid);
+      items.push({
+        id: c.id, upc: c.fields.UPC, sku: c.fields.SKU || '', name: c.fields.Name || '', brand: c.fields.Brand || '',
+        cost: c.fields.Cost ?? null, count: counts[c.fields.UPC] || 1,
+      });
+    }
+    fields['Bundle Items'] = JSON.stringify(items);
+    fields.Units = items.reduce((n, i) => n + i.count, 0);
+    if (items.every((i) => i.cost != null)) fields.Cost = Math.round(items.reduce((a, i) => a + i.cost * i.count, 0) * 100) / 100;
+  }
+  if (p) {
+    fields.Product = [p.id];
+    if (p.fields['Start Price'] != null) fields['Start Price'] = p.fields['Start Price'];
+    if (p.fields.Cost != null && fields.Cost == null) fields.Cost = p.fields.Cost;
+    if (p.fields['Image URL']) fields['Image URL'] = p.fields['Image URL'];
+  }
+
+  const [rec] = await at.create(T.auctions, [fields]);
+  return json(200, { auction: shape.auction(rec), product: p ? shape.product(p) : null, unknown: !p });
+});
