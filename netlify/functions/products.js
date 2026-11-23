@@ -29,7 +29,7 @@ exports.handler = wrap(async (event) => {
       const rows = await at.list(T.products, { filter, max: 200, sort: [{ field: 'Name' }] });
       return json(200, { products: rows.map(shape.product) });
     }
-    const rows = await at.list(T.products, { max: 300, sort: [{ field: 'Name' }] });
+    const rows = await at.list(T.products, { sort: [{ field: 'Name' }] });
     return json(200, { products: rows.map(shape.product) });
   }
 
@@ -52,6 +52,30 @@ exports.handler = wrap(async (event) => {
   }
 
   if (event.httpMethod !== 'POST') return json(405, { error: 'GET, POST or DELETE' });
+
+  // Bulk delete: POST {action:'delete', ids:[...]} (up to 50). Products inside a bundle are skipped.
+  if (body(event).action === 'delete') {
+    const ids = [...new Set((body(event).ids || []).filter((x) => /^rec\w{14}$/.test(x)))];
+    if (!ids.length) return json(400, { error: 'Nothing selected' });
+    if (ids.length > 50) return json(400, { error: 'Send 50 or fewer per request' });
+    const all = await at.list(T.products, { fields: ['UPC', 'Name', 'In Bundles', 'Is Bundle'] });
+    const byId = Object.fromEntries(all.map((r) => [r.id, r]));
+    const deleting = new Set(ids);
+    const ok = []; const blocked = [];
+    ids.forEach((id) => {
+      const r = byId[id];
+      if (!r) return; // already gone
+      // A product can go if every bundle it's in is being deleted in the same batch.
+      const stuck = (r.fields['In Bundles'] || []).filter((b) => !deleting.has(b) && byId[b]);
+      if (stuck.length) blocked.push({ id, name: r.fields.Name || r.fields.UPC, bundles: stuck.map((b) => byId[b].fields.Name || byId[b].fields.UPC) });
+      else ok.push(id);
+    });
+    // Bundles first, so their links to products are gone before the products are.
+    ok.sort((a, b) => (byId[b].fields['Is Bundle'] ? 1 : 0) - (byId[a].fields['Is Bundle'] ? 1 : 0));
+    await at.delMany(T.products, ok);
+    return json(200, { deleted: ok.length, blocked });
+  }
+
   const input = body(event).records || [];
   if (!input.length) return json(400, { error: 'No records' });
   if (input.length > 50) return json(400, { error: 'Send 50 or fewer per request' });
