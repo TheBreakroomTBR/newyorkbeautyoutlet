@@ -154,6 +154,20 @@ td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
 .orph .who{flex:1;min-width:180px}
 .lbpanel{border:2px solid var(--rose);margin:-4px 0 16px;background:#fff}
 .scanbar.bundling input{border-color:var(--rose);box-shadow:0 0 0 3px rgba(200,111,126,.18)}
+.filters{display:flex;flex-wrap:wrap;gap:8px 10px;align-items:flex-end;margin:0 0 10px;padding:10px 12px;background:var(--bg2);border-radius:12px}
+.filters label{display:flex;flex-direction:column;gap:3px;font-size:11.5px;font-weight:600;color:var(--mut)}
+.filters select,.filters input{padding:6px 8px;font-size:13px;border-radius:8px}
+.filters .rng{display:flex;gap:4px}
+.filters .rng input{width:64px}
+.bulkbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;background:#fff;border:2px solid var(--rose);border-radius:12px;padding:8px 12px;margin:0 0 10px}
+.bulkbar .del{color:var(--bad);border-color:#efc3c9}
+th.sort{cursor:pointer;user-select:none;white-space:nowrap}
+th.sort:hover{color:var(--ink)}
+th.sort.on{color:var(--rosedk)}
+td.ck,th.ck{width:30px;padding-right:0}
+td.ck input,th.ck input{width:16px;height:16px;accent-color:var(--rose);cursor:pointer}
+tr.picked td{background:#fde7ea}
+.nophoto{display:flex;align-items:center;justify-content:center;border-style:dashed!important;border-color:var(--warn)!important;color:var(--warn);font-size:8.5px;font-weight:700;letter-spacing:.02em}
 .testbar{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;background:#fbf0d9;border:1px solid #efd9a6;color:#6b4d10;border-radius:14px;padding:10px 14px;margin:-6px 0 16px}
 .check{display:flex;align-items:center;gap:10px;font-weight:500}
 .check input{width:18px;height:18px;accent-color:var(--rose)}
@@ -294,9 +308,24 @@ dialog::backdrop{background:rgba(60,30,36,.35);backdrop-filter:blur(3px)}
           <button type="button" data-cat="bundles" role="tab">Bundles <span class="mut" id="catNB"></span></button>
         </div>
         <button class="btn small" id="fillPhotos" type="button">Fill missing photos</button>
-        <input id="pSearch" type="text" placeholder="Search name, brand, or UPC" style="flex:1;max-width:320px">
+        <input id="pSearch" type="text" placeholder="Search name, brand, SKU, or UPC" style="flex:1;max-width:320px">
       </div>
       <div id="fillStatus" class="mut" style="font-size:13px;margin:-2px 0 8px" hidden></div>
+      <div class="filters" id="catFilters">
+        <label>Photo<select id="fPhoto"><option value="">All</option><option value="none">No photo</option><option value="has">Has photo</option></select></label>
+        <label>Brand<select id="fBrand"><option value="">All brands</option></select></label>
+        <label>Stock<select id="fStock"><option value="">All</option><option value="in">In stock</option><option value="low">Low (1–5)</option><option value="out">Out (0 or less)</option></select></label>
+        <label>Start price<span class="rng"><input id="fSpMin" type="number" step="0.01" placeholder="min"><input id="fSpMax" type="number" step="0.01" placeholder="max"></span></label>
+        <label>Cost<span class="rng"><input id="fCostMin" type="number" step="0.01" placeholder="min"><input id="fCostMax" type="number" step="0.01" placeholder="max"></span></label>
+        <label>Qty<span class="rng"><input id="fQtyMin" type="number" step="1" placeholder="min"><input id="fQtyMax" type="number" step="1" placeholder="max"></span></label>
+        <button class="btn small" id="fClear" type="button">Clear filters</button>
+      </div>
+      <div class="bulkbar" id="selBar" hidden>
+        <b id="bulkN"></b>
+        <button class="btn small del" id="bulkDel" type="button">Delete selected</button>
+        <button class="btn small" id="bulkNone" type="button">Clear selection</button>
+      </div>
+      <div class="mut" id="catShowing" style="font-size:12.5px;margin:0 0 4px"></div>
       <div class="tablewrap"><table>
         <thead id="catHead"></thead>
         <tbody id="catBody"></tbody>
@@ -1101,7 +1130,7 @@ $('#pSave').onclick = async () => {
 };
 
 let searchTimer;
-$('#pSearch').addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(searchProducts, 300); });
+$('#pSearch').addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(renderCatalog, 120); });
 let catView = 'products';
 $$('[data-cat]').forEach((b) => b.onclick = () => {
   catView = b.dataset.cat;
@@ -1110,38 +1139,164 @@ $$('[data-cat]').forEach((b) => b.onclick = () => {
   searchProducts();
 });
 
+// ---- Catalog: sort, filter, bulk select ----
+let catAll = [];          // every product (or bundle) loaded for the current view
+let catShown = [];        // after filters + sort
+const picked = new Set(); // selected record ids
+let catSort = (() => { try { return JSON.parse(localStorage.getItem('bat_catsort')) || { key: 'name', dir: 1 }; } catch (e) { return { key: 'name', dir: 1 }; } })();
+const fIds = ['fPhoto', 'fBrand', 'fStock', 'fSpMin', 'fSpMax', 'fCostMin', 'fCostMax', 'fQtyMin', 'fQtyMax'];
+const nOrNull = (v) => (v === '' || v == null || !isFinite(v) ? null : Number(v));
+
 async function searchProducts() {
-  const q = $('#pSearch').value.trim();
-  const thumb = (img) => '<td><div class="thumb" style="' + (img ? 'background-image:url(&quot;' + esc(img) + '&quot;)' : '') + '"></div></td>';
   try {
     if (catView === 'bundles') {
-      $('#catHead').innerHTML = '<tr><th></th><th>Bundle</th><th class="num">Items</th><th>Barcode</th><th class="num">Cost</th><th class="num">Can make</th></tr>';
       const d = await api('bundles');
-      const ql = q.toLowerCase();
-      const list = d.bundles.filter((b) => !ql || (b.name + ' ' + b.upc + ' ' + b.contents).toLowerCase().includes(ql));
-      $('#catNB').textContent = d.bundles.length;
-      $('#catBody').innerHTML = list.map((b) => {
-        const lines = bundleLines(b.contents);
-        return '<tr data-upc="' + esc(b.upc) + '" style="cursor:pointer">' + thumb(b.image) +
-          '<td><b style="font-weight:600">' + esc(b.name) + '</b><div class="mut" style="font-size:12px">' + esc(lines.map((l) => l.count + '× ' + l.name).join(' · ')) + '</div></td>' +
-          '<td class="num">' + lines.reduce((n, l) => n + l.count, 0) + '</td><td class="mut">' + esc(b.upc) + '</td>' +
-          '<td class="num">' + esc(money(b.cost)) + '</td>' +
-          '<td class="num" style="color:' + (b.available <= 0 ? 'var(--bad)' : b.available <= 2 ? 'var(--warn)' : 'inherit') + '">' + esc(b.available) + '</td></tr>';
-      }).join('') || '<tr><td colspan="6" class="mut">' + (q ? 'No matching bundles.' : 'No bundles yet. Build one on the Bundles tab.') + '</td></tr>';
-      return;
+      catAll = d.bundles.map((b) => ({ ...b, items: bundleLines(b.contents).reduce((n, l) => n + l.count, 0) }));
+      $('#catNB').textContent = catAll.length;
+    } else {
+      const d = await api('products');
+      catAll = d.products.filter((p) => !p.isBundle);
+      $('#catNP').textContent = catAll.length;
+      // Brand list for the filter
+      const cur = $('#fBrand').value;
+      const brands = [...new Set(catAll.map((p) => p.brand).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+      $('#fBrand').innerHTML = '<option value="">All brands</option>' + brands.map((b) => '<option' + (b === cur ? ' selected' : '') + '>' + esc(b) + '</option>').join('');
     }
-    $('#catHead').innerHTML = '<tr><th></th><th>Name</th><th>Brand</th><th>SKU</th><th>UPC</th><th class="num">Cost</th><th class="num">Qty</th></tr>';
-    const d = await api('products' + (q ? '?q=' + encodeURIComponent(q) : ''));
-    const list = d.products.filter((p) => !p.isBundle);
-    if (!q) $('#catNP').textContent = list.length;
-    $('#catBody').innerHTML = list.map((p) =>
-      '<tr data-upc="' + esc(p.upc) + '" style="cursor:pointer">' + thumb(p.image) +
-      '<td>' + esc(p.name) + '</td><td>' + esc(p.brand) + '</td><td class="mut">' + esc(p.sku) + '</td><td class="mut">' + esc(p.upc) + '</td>' +
-      '<td class="num">' + esc(money(p.cost)) + '</td><td class="num" style="color:' + (p.qty <= 0 ? 'var(--bad)' : p.qty <= 2 ? 'var(--warn)' : 'inherit') + '">' + esc(p.qty) + '</td></tr>'
-    ).join('') || '<tr><td colspan="7" class="mut">' + (q ? 'No matches.' : 'No products yet. Scan one or import a CSV.') + '</td></tr>';
-  } catch (e) { $('#catBody').innerHTML = '<tr><td colspan="7" class="mut">' + esc(e.message) + '</td></tr>'; }
+    // Drop selections that no longer exist
+    const ids = new Set(catAll.map((p) => p.id));
+    [...picked].forEach((id) => { if (!ids.has(id)) picked.delete(id); });
+    renderCatalog();
+  } catch (e) { $('#catBody').innerHTML = '<tr><td colspan="9" class="mut">' + esc(e.message) + '</td></tr>'; }
 }
+
+function renderCatalog() {
+  const q = $('#pSearch').value.trim().toLowerCase();
+  const bundles = catView === 'bundles';
+  $('#catFilters').hidden = bundles;
+  const f = {
+    photo: $('#fPhoto').value, brand: $('#fBrand').value, stock: $('#fStock').value,
+    spMin: nOrNull($('#fSpMin').value), spMax: nOrNull($('#fSpMax').value),
+    cMin: nOrNull($('#fCostMin').value), cMax: nOrNull($('#fCostMax').value),
+    qMin: nOrNull($('#fQtyMin').value), qMax: nOrNull($('#fQtyMax').value),
+  };
+  const inRange = (v, lo, hi) => (lo == null || (v != null && v >= lo)) && (hi == null || (v != null && v <= hi));
+  let list = catAll.filter((p) => {
+    if (q) {
+      const hay = bundles ? (p.name + ' ' + p.upc + ' ' + p.contents) : (p.name + ' ' + p.brand + ' ' + p.sku + ' ' + p.upc);
+      if (!hay.toLowerCase().includes(q)) return false;
+    }
+    if (bundles) return true;
+    if (f.photo === 'none' && p.image) return false;
+    if (f.photo === 'has' && !p.image) return false;
+    if (f.brand && p.brand !== f.brand) return false;
+    if (f.stock === 'in' && !(p.qty > 0)) return false;
+    if (f.stock === 'low' && !(p.qty >= 1 && p.qty <= 5)) return false;
+    if (f.stock === 'out' && !(p.qty <= 0)) return false;
+    return inRange(p.startPrice, f.spMin, f.spMax) && inRange(p.cost, f.cMin, f.cMax) && inRange(p.qty, f.qMin, f.qMax);
+  });
+
+  const val = (p, k) => {
+    if (k === 'photo') return p.image ? 1 : 0;
+    const v = p[k];
+    return typeof v === 'string' ? v.toLowerCase() : v;
+  };
+  const { key, dir } = catSort;
+  list.sort((a, b) => {
+    const x = val(a, key), y = val(b, key);
+    if (x == null && y == null) return 0;
+    if (x == null) return 1; // blanks last
+    if (y == null) return -1;
+    return (x > y ? 1 : x < y ? -1 : 0) * dir || String(a.name).localeCompare(String(b.name));
+  });
+  catShown = list;
+
+  const th = (k, label, cls) => '<th class="sort' + (cls ? ' ' + cls : '') + (key === k ? ' on' : '') + '" data-sort="' + k + '" title="Sort">' + label + (key === k ? (dir > 0 ? ' ▲' : ' ▼') : '') + '</th>';
+  const allPicked = list.length && list.every((p) => picked.has(p.id));
+  const ck = '<th class="ck"><input type="checkbox" id="catAllCk" aria-label="Select all shown"' + (allPicked ? ' checked' : '') + '></th>';
+  const thumb = (img) => '<td>' + (img ? '<div class="thumb" style="background-image:url(&quot;' + esc(img) + '&quot;)"></div>' : '<div class="thumb nophoto" title="No photo">NONE</div>') + '</td>';
+  const rowCk = (p) => '<td class="ck"><input type="checkbox" data-pick-id="' + esc(p.id) + '" aria-label="Select"' + (picked.has(p.id) ? ' checked' : '') + '></td>';
+  const qtyColor = (n) => (n <= 0 ? 'var(--bad)' : n <= 2 ? 'var(--warn)' : 'inherit');
+
+  if (bundles) {
+    $('#catHead').innerHTML = '<tr>' + ck + th('photo', 'Pic') + th('name', 'Bundle') + th('items', 'Items', 'num') + '<th>Barcode</th>' + th('startPrice', 'Start', 'num') + th('cost', 'Cost', 'num') + th('available', 'Can make', 'num') + '</tr>';
+    $('#catBody').innerHTML = list.map((b) => {
+      const lines = bundleLines(b.contents);
+      return '<tr data-upc="' + esc(b.upc) + '" class="' + (picked.has(b.id) ? 'picked' : '') + '" style="cursor:pointer">' + rowCk(b) + thumb(b.image) +
+        '<td><b style="font-weight:600">' + esc(b.name) + '</b><div class="mut" style="font-size:12px">' + esc(lines.map((l) => l.count + '× ' + l.name).join(' · ')) + '</div></td>' +
+        '<td class="num">' + b.items + '</td><td class="mut">' + esc(b.upc) + '</td>' +
+        '<td class="num">' + esc(money(b.startPrice)) + '</td><td class="num">' + esc(money(b.cost)) + '</td>' +
+        '<td class="num" style="color:' + qtyColor(b.available) + '">' + esc(b.available) + '</td></tr>';
+    }).join('') || '<tr><td colspan="8" class="mut">' + (q ? 'No matching bundles.' : 'No bundles yet. Build one on the Bundles tab.') + '</td></tr>';
+  } else {
+    $('#catHead').innerHTML = '<tr>' + ck + th('photo', 'Pic') + th('name', 'Name') + th('brand', 'Brand') + th('sku', 'SKU') + th('startPrice', 'Start', 'num') + th('cost', 'Cost', 'num') + th('qty', 'Qty', 'num') + '</tr>';
+    $('#catBody').innerHTML = list.map((p) =>
+      '<tr data-upc="' + esc(p.upc) + '" class="' + (picked.has(p.id) ? 'picked' : '') + '" style="cursor:pointer">' + rowCk(p) + thumb(p.image) +
+      '<td>' + esc(p.name) + '<div class="mut" style="font-size:11.5px">' + esc(p.upc) + '</div></td><td>' + esc(p.brand) + '</td><td class="mut">' + esc(p.sku) + '</td>' +
+      '<td class="num">' + esc(money(p.startPrice)) + '</td><td class="num">' + esc(money(p.cost)) + '</td>' +
+      '<td class="num" style="color:' + qtyColor(p.qty) + '">' + esc(p.qty) + '</td></tr>'
+    ).join('') || '<tr><td colspan="8" class="mut">' + (catAll.length ? 'Nothing matches these filters.' : 'No products yet. Scan one or import a CSV.') + '</td></tr>';
+  }
+  const noun = bundles ? 'bundles' : 'products';
+  $('#catShowing').textContent = 'Showing ' + list.length + ' of ' + catAll.length + ' ' + noun;
+  $('#selBar').hidden = !picked.size;
+  $('#bulkN').textContent = picked.size + ' selected';
+}
+
+// Sort by clicking a column header
+$('#catHead').addEventListener('click', (e) => {
+  const c = e.target.closest('[data-sort]');
+  if (c) {
+    const k = c.dataset.sort;
+    catSort = { key: k, dir: catSort.key === k ? -catSort.dir : (k === 'photo' ? 1 : 1) };
+    try { localStorage.setItem('bat_catsort', JSON.stringify(catSort)); } catch (err) {}
+    renderCatalog();
+  }
+});
+$('#catHead').addEventListener('change', (e) => {
+  if (e.target.id !== 'catAllCk') return;
+  catShown.forEach((p) => (e.target.checked ? picked.add(p.id) : picked.delete(p.id)));
+  renderCatalog();
+});
+// Filters and search re-render instantly (no reload)
+fIds.forEach((id) => $('#' + id).addEventListener('input', renderCatalog));
+$('#fClear').onclick = () => { fIds.forEach((id) => { $('#' + id).value = ''; }); renderCatalog(); };
+
+// Bulk delete
+$('#bulkNone').onclick = () => { picked.clear(); renderCatalog(); };
+$('#bulkDel').onclick = async () => {
+  const ids = [...picked];
+  if (!ids.length) return;
+  const names = catAll.filter((p) => picked.has(p.id)).slice(0, 5).map((p) => '• ' + p.name).join('\n');
+  if (!confirm('Delete ' + ids.length + (catView === 'bundles' ? ' bundle(s)' : ' product(s)') + ' from the catalog?\n\n' + names + (ids.length > 5 ? '\n…and ' + (ids.length - 5) + ' more' : '') + '\n\nPast sales stay in your reports. This can’t be undone.')) return;
+  const btn = $('#bulkDel'); btn.disabled = true;
+  let deleted = 0; const blocked = [];
+  try {
+    for (let i = 0; i < ids.length; i += 50) {
+      btn.textContent = 'Deleting ' + Math.min(i + 50, ids.length) + ' of ' + ids.length + '…';
+      const d = await api('products', { method: 'POST', body: { action: 'delete', ids: ids.slice(i, i + 50) } });
+      deleted += d.deleted; blocked.push(...d.blocked);
+    }
+    toast('Deleted ' + deleted, 'ok');
+    if (blocked.length) {
+      toast(blocked.length + ' not deleted — they’re inside bundles (e.g. ' + blocked[0].name + ' → ' + blocked[0].bundles[0] + '). Delete those bundles first, or select them too.', 'warn');
+    }
+    picked.clear();
+    blocked.forEach((b) => picked.add(b.id)); // leave the blocked ones selected so you can see them
+  } catch (err) { toast(err.message, 'bad'); }
+  btn.disabled = false; btn.textContent = 'Delete selected';
+  if (editingProduct && !catAll.some((p) => p.id === editingProduct.id && !picked.has(p.id))) clearForm();
+  searchProducts();
+};
+
 $('#catBody').addEventListener('click', (e) => {
+  // Checkbox: select without opening the product
+  const ckb = e.target.closest('input[data-pick-id]');
+  if (ckb) {
+    ckb.checked ? picked.add(ckb.dataset.pickId) : picked.delete(ckb.dataset.pickId);
+    renderCatalog();
+    return;
+  }
+  if (e.target.closest('td.ck')) return;
   const tr = e.target.closest('tr[data-upc]');
   if (!tr) return;
   pf.upc.value = tr.dataset.upc; loadUpc(); window.scrollTo({ top: 0, behavior: 'smooth' });
