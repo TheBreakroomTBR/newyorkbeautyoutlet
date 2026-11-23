@@ -94,6 +94,9 @@ exports.handler = wrap(async (event) => {
     if (r.cost !== '' && r.cost != null && cost != null) f.Cost = cost;
     const qty = num(r.qty);
     if (r.qty !== '' && r.qty != null && qty != null) f['Qty On Hand'] = Math.round(qty);
+    const sp = num(String(r.startPrice ?? '').replace(/[$,]/g, ''));
+    if (r.startPrice !== '' && r.startPrice != null && sp != null) f['Start Price'] = sp;
+    if (r.sku != null && String(r.sku).trim() !== '') f.SKU = String(r.sku).trim();
     recs.push(f);
   });
 
