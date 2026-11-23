@@ -276,6 +276,8 @@ dialog::backdrop{background:rgba(60,30,36,.35);backdrop-filter:blur(3px)}
           <label class="f">Category<input id="pCat" type="text"></label>
           <label class="f">Cost ($)<input id="pCost" type="number" step="0.01" min="0"></label>
           <label class="f">Qty on hand<input id="pQty" type="number" step="1"></label>
+          <label class="f">Recommended start price ($)<input id="pStart" type="number" step="0.01" min="0"></label>
+          <label class="f">SKU<input id="pSku" type="text" autocomplete="off"></label>
           <label class="f full">Image URL
             <span class="row" style="flex-wrap:nowrap"><input id="pImg" type="text" style="flex:1" placeholder="Paste an image address">
             <button class="btn small" id="pFind" type="button">Find photo</button></span></label>
@@ -291,7 +293,7 @@ dialog::backdrop{background:rgba(60,30,36,.35);backdrop-filter:blur(3px)}
       </div>
       <div class="panel" style="margin-top:16px">
         <h3>Bulk import from CSV</h3>
-        <p class="mut" style="margin-top:0">Columns: UPC, Name, Brand, Category, Cost, Qty, Image URL. Existing UPCs are updated. Format the UPC column as text in Excel so leading zeros survive.</p>
+        <p class="mut" style="margin-top:0">Columns: UPC, Name, Brand, Category, Cost, Qty, Recommended Start Price, SKU, Image URL. Existing UPCs are updated. Format the UPC column as text in Excel so leading zeros survive.</p>
         <div class="row">
           <input id="bulkFile" type="file" accept=".csv,text/csv">
           <button class="btn" id="bulkTemplate" type="button">Download template</button>
@@ -1036,7 +1038,7 @@ $('#noSaleOld').onclick = async () => {
 };
 
 // ---------- PRODUCTS ----------
-const pf = { upc: $('#pUpc'), name: $('#pName'), brand: $('#pBrand'), category: $('#pCat'), cost: $('#pCost'), qty: $('#pQty'), image: $('#pImg') };
+const pf = { upc: $('#pUpc'), name: $('#pName'), brand: $('#pBrand'), category: $('#pCat'), cost: $('#pCost'), qty: $('#pQty'), startPrice: $('#pStart'), sku: $('#pSku'), image: $('#pImg') };
 function showPrev() {
   const u = pf.image.value.trim();
   $('#pPrev').hidden = !/^https?:\/\//.test(u);
@@ -1109,7 +1111,7 @@ async function loadUpc() {
     if (d.product) { fillForm(d.product); editingProduct = d.product; $('#pDelete').hidden = false; $('#pMsg').textContent = 'Already in catalog — editing.'; pf.qty.focus(); return; }
     editingProduct = null; $('#pDelete').hidden = true;
     const l = await api('upc-lookup?upc=' + upc);
-    ['name', 'brand', 'category', 'cost', 'qty', 'image'].forEach((k) => pf[k].value = '');
+    ['name', 'brand', 'category', 'cost', 'qty', 'startPrice', 'sku', 'image'].forEach((k) => pf[k].value = '');
     if (l.found) { fillForm(l); $('#pMsg').textContent = 'New product — details filled from UPC. Add cost and qty.'; pf.cost.focus(); }
     else { $('#pMsg').textContent = 'New product — no UPC match, type the details.'; pf.name.focus(); }
   } catch (e) { $('#pMsg').textContent = e.message; }
@@ -1327,7 +1329,7 @@ function guess(headers, patterns) {
 function logTo(el, line) { el.hidden = false; el.textContent += line + '\n'; el.scrollTop = el.scrollHeight; }
 
 $('#bulkTemplate').onclick = () => {
-  const csv = 'UPC,Name,Brand,Category,Cost,Qty,Image URL\n012345678905,Example Lip Oil,Example Brand,Lips,4.50,12,\n';
+  const csv = 'UPC,Name,Brand,Category,Cost,Qty,Recommended Start Price,SKU,Image URL\n012345678905,Example Lip Oil,Example Brand,Lips,4.50,12,3.00,04521,\n';
   const a = document.createElement('a');
   a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
   a.download = 'products-template.csv'; a.click();
@@ -1348,6 +1350,8 @@ $('#bulkFile').onchange = async (e) => {
     cost: guess(h, [/cost/i]),
     qty: guess(h, [/^qty$/i, /qty|quantity|stock/i]),
     image: guess(h, [/image|photo|img/i]),
+    startPrice: guess(h, [/recommended.*start|start.*price|starting price|recommended/i]),
+    sku: guess(h, [/^sku$/i, /seller sku|sku/i]),
   };
   if (col.upc < 0) return logTo(log, 'Couldn’t find a UPC column.');
   const recs = rows.slice(1).map((r) => {
